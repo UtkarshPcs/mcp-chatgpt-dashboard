@@ -166,6 +166,66 @@ const handler = createMcpHandler(
     );
 
     server.registerTool(
+      "bulk_import_syllabus",
+      {
+        title: "Bulk Import Syllabus",
+        description: "Creates multiple subjects and their nested chapters in a single operation. This is the BEST tool to use when you need to import an entire syllabus from scratch. Do not include 'id' or 'subjectId'.",
+        inputSchema: z.object({
+          subjects: z.array(z.object({
+            name: z.string(),
+            color: z.enum(['blue', 'red', 'emerald', 'amber', 'purple', 'rose']).optional(),
+            chapters: z.array(z.object({
+              title: z.string(),
+              progress: z.number().min(0).max(100).optional(),
+              status: z.enum(['not_started', 'in_progress', 'revision', 'completed']).optional(),
+              priority: z.enum(['low', 'medium', 'high']).optional(),
+              estimatedTime: z.string().optional(),
+              targetDate: z.string().optional(),
+              notes: z.string().optional()
+            }))
+          }))
+        })
+      },
+      async (args) => {
+        try {
+          const now = new Date().toISOString();
+          let subjectsCreated = 0;
+          let chaptersCreated = 0;
+          
+          for (const sub of args.subjects) {
+            const subRef = await push(ref(db, "subjects"), {
+              name: sub.name,
+              color: sub.color || "blue",
+              createdAt: now,
+              updatedAt: now,
+            });
+            subjectsCreated++;
+            
+            for (const chap of sub.chapters) {
+              await push(ref(db, "chapters"), {
+                subjectId: subRef.key,
+                title: chap.title,
+                progress: chap.progress || 0,
+                status: chap.status || 'not_started',
+                priority: chap.priority || 'medium',
+                estimatedTime: chap.estimatedTime || "",
+                targetDate: chap.targetDate || "",
+                notes: chap.notes || "",
+                createdAt: now,
+                updatedAt: now,
+              });
+              chaptersCreated++;
+            }
+          }
+          
+          return { content: [{ type: "text", text: `Successfully imported ${subjectsCreated} subjects and ${chaptersCreated} chapters!` }] };
+        } catch (error: any) {
+          return { content: [{ type: "text", text: `Error: ${error.message}` }], isError: true };
+        }
+      }
+    );
+
+    server.registerTool(
       "delete_chapter",
       {
         title: "Delete Chapter",
