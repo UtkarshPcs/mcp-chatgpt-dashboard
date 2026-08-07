@@ -100,56 +100,65 @@ const handler = createMcpHandler(
     );
 
     server.registerTool(
-      "upsert_chapter",
+      "upsert_chapters",
       {
-        title: "Upsert Chapter",
-        description: "Creates a new chapter or updates an existing one. To update, provide the existing 'id'. To create a new chapter, leave 'id' empty but you MUST provide 'subjectId' and 'title'.",
+        title: "Bulk Upsert Chapters",
+        description: "Creates or updates multiple chapters at once. Pass an array of chapter objects. For each object: to update, provide the existing 'id'. To create a new chapter, leave 'id' empty but you MUST provide 'subjectId' and 'title'.",
         inputSchema: z.object({
-          id: z.string().optional().describe("Provide to update existing, omit to create new"),
-          subjectId: z.string().optional().describe("ID of the parent subject"),
-          title: z.string().optional().describe("Chapter title"),
-          progress: z.number().min(0).max(100).optional().describe("Completion percentage 0-100"),
-          status: z.enum(['not_started', 'in_progress', 'revision', 'completed']).optional(),
-          priority: z.enum(['low', 'medium', 'high']).optional(),
-          estimatedTime: z.string().optional(),
-          targetDate: z.string().optional(),
-          notes: z.string().optional()
+          chapters: z.array(z.object({
+            id: z.string().optional().describe("Provide to update existing, omit to create new"),
+            subjectId: z.string().optional().describe("ID of the parent subject"),
+            title: z.string().optional().describe("Chapter title"),
+            progress: z.number().min(0).max(100).optional().describe("Completion percentage 0-100"),
+            status: z.enum(['not_started', 'in_progress', 'revision', 'completed']).optional(),
+            priority: z.enum(['low', 'medium', 'high']).optional(),
+            estimatedTime: z.string().optional(),
+            targetDate: z.string().optional(),
+            notes: z.string().optional()
+          }))
         })
       },
       async (args) => {
         try {
           const now = new Date().toISOString();
+          const results = [];
           
-          if (args.id) {
-            // Update
-            const { id, ...updates } = args;
-            const finalUpdates = { ...updates, updatedAt: now };
-            
-            if (finalUpdates.status === 'completed' && finalUpdates.progress === undefined) {
-               finalUpdates.progress = 100;
-            } else if (finalUpdates.progress === 100 && finalUpdates.status === undefined) {
-               finalUpdates.status = 'completed';
+          for (const chap of args.chapters) {
+            if (chap.id) {
+              // Update
+              const { id, ...updates } = chap;
+              const finalUpdates = { ...updates, updatedAt: now };
+              
+              if (finalUpdates.status === 'completed' && finalUpdates.progress === undefined) {
+                 finalUpdates.progress = 100;
+              } else if (finalUpdates.progress === 100 && finalUpdates.status === undefined) {
+                 finalUpdates.status = 'completed';
+              }
+              
+              await update(ref(db, `chapters/${id}`), finalUpdates);
+              results.push(`Updated ${id}`);
+            } else {
+              // Create
+              if (!chap.subjectId || !chap.title) {
+                results.push(`Failed to create chapter: subjectId and title are required`);
+                continue;
+              }
+              const newRef = await push(ref(db, "chapters"), {
+                subjectId: chap.subjectId,
+                title: chap.title,
+                progress: chap.progress || 0,
+                status: chap.status || 'not_started',
+                priority: chap.priority || 'medium',
+                estimatedTime: chap.estimatedTime || "",
+                targetDate: chap.targetDate || "",
+                notes: chap.notes || "",
+                createdAt: now,
+                updatedAt: now,
+              });
+              results.push(`Created new chapter with ID: ${newRef.key}`);
             }
-            
-            await update(ref(db, `chapters/${id}`), finalUpdates);
-            return { content: [{ type: "text", text: `Chapter ${id} updated` }] };
-          } else {
-            // Create
-            if (!args.subjectId || !args.title) throw new Error("subjectId and title are required to create a new chapter");
-            const newRef = await push(ref(db, "chapters"), {
-              subjectId: args.subjectId,
-              title: args.title,
-              progress: args.progress || 0,
-              status: args.status || 'not_started',
-              priority: args.priority || 'medium',
-              estimatedTime: args.estimatedTime || "",
-              targetDate: args.targetDate || "",
-              notes: args.notes || "",
-              createdAt: now,
-              updatedAt: now,
-            });
-            return { content: [{ type: "text", text: `Chapter created with ID: ${newRef.key}` }] };
           }
+          return { content: [{ type: "text", text: results.join('\n') }] };
         } catch (error: any) {
           return { content: [{ type: "text", text: `Error: ${error.message}` }], isError: true };
         }
