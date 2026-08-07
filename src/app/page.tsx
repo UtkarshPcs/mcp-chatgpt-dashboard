@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { collection, onSnapshot, updateDoc, doc, query, orderBy } from "firebase/firestore";
+import { ref, onValue, update } from "firebase/database";
 import { db } from "@/lib/firebase";
 
 type Task = {
@@ -16,14 +16,20 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Listen to real-time updates
-    const q = query(collection(db, "tasks")); // Can't easily order without composite index if we sort by createdAt and completed. Just fetch all.
+    const tasksRef = ref(db, "tasks");
     
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const tasksData: Task[] = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as Task[];
+    const unsubscribe = onValue(tasksRef, (snapshot) => {
+      const data = snapshot.val();
+      const tasksData: Task[] = [];
+      
+      if (data) {
+        Object.keys(data).forEach((key) => {
+          tasksData.push({
+            id: key,
+            ...data[key]
+          });
+        });
+      }
       
       // Sort tasks locally: incomplete first, then by creation date
       tasksData.sort((a, b) => {
@@ -45,8 +51,8 @@ export default function Home() {
 
   const toggleTask = async (id: string, completed: boolean) => {
     try {
-      const taskRef = doc(db, "tasks", id);
-      await updateDoc(taskRef, { completed: !completed });
+      const taskRef = ref(db, `tasks/${id}`);
+      await update(taskRef, { completed: !completed });
     } catch (error) {
       console.error("Error updating task:", error);
     }

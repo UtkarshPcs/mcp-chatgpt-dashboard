@@ -1,6 +1,6 @@
 import { createMcpHandler } from "mcp-handler";
 import { z } from "zod";
-import { collection, addDoc } from "firebase/firestore";
+import { ref, push } from "firebase/database";
 import { db } from "@/lib/firebase";
 
 const handler = createMcpHandler(
@@ -16,13 +16,14 @@ const handler = createMcpHandler(
       },
       async (args) => {
         try {
-          const docRef = await addDoc(collection(db, "tasks"), {
+          const tasksRef = ref(db, "tasks");
+          const newTaskRef = await push(tasksRef, {
             title: args.title,
             completed: false,
             createdAt: new Date().toISOString(),
           });
           return {
-            content: [{ type: "text", text: `Task created successfully with ID: ${docRef.id}` }],
+            content: [{ type: "text", text: `Task created successfully with ID: ${newTaskRef.key}` }],
           };
         } catch (error: any) {
           return {
