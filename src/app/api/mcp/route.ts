@@ -169,30 +169,29 @@ const handler = createMcpHandler(
       "bulk_import_syllabus",
       {
         title: "Bulk Import Syllabus",
-        description: "Creates multiple subjects and their nested chapters in a single operation. This is the BEST tool to use when you need to import an entire syllabus from scratch. Do not include 'id' or 'subjectId'.",
+        description: "Creates multiple subjects and their nested chapters in a single operation. Provide 'jsonData' as a raw JSON string matching: { subjects: [ { name: '...', color: '...', chapters: [ { title: '...', progress: 0, status: '...', priority: '...' } ] } ] }.",
         inputSchema: z.object({
-          subjects: z.array(z.object({
-            name: z.string(),
-            color: z.enum(['blue', 'red', 'emerald', 'amber', 'purple', 'rose']).optional(),
-            chapters: z.array(z.object({
-              title: z.string(),
-              progress: z.number().min(0).max(100).optional(),
-              status: z.enum(['not_started', 'in_progress', 'revision', 'completed']).optional(),
-              priority: z.enum(['low', 'medium', 'high']).optional(),
-              estimatedTime: z.string().optional(),
-              targetDate: z.string().optional(),
-              notes: z.string().optional()
-            }))
-          }))
+          jsonData: z.string().describe("A JSON string containing the subjects array.")
         })
       },
       async (args) => {
         try {
           const now = new Date().toISOString();
+          let parsedData;
+          try {
+            parsedData = JSON.parse(args.jsonData);
+          } catch (e) {
+            return { content: [{ type: "text", text: "Error: Invalid JSON string provided." }], isError: true };
+          }
+          
+          if (!parsedData.subjects || !Array.isArray(parsedData.subjects)) {
+            return { content: [{ type: "text", text: "Error: JSON must contain a 'subjects' array." }], isError: true };
+          }
+
           let subjectsCreated = 0;
           let chaptersCreated = 0;
           
-          for (const sub of args.subjects) {
+          for (const sub of parsedData.subjects) {
             const subRef = await push(ref(db, "subjects"), {
               name: sub.name,
               color: sub.color || "blue",
@@ -201,20 +200,22 @@ const handler = createMcpHandler(
             });
             subjectsCreated++;
             
-            for (const chap of sub.chapters) {
-              await push(ref(db, "chapters"), {
-                subjectId: subRef.key,
-                title: chap.title,
-                progress: chap.progress || 0,
-                status: chap.status || 'not_started',
-                priority: chap.priority || 'medium',
-                estimatedTime: chap.estimatedTime || "",
-                targetDate: chap.targetDate || "",
-                notes: chap.notes || "",
-                createdAt: now,
-                updatedAt: now,
-              });
-              chaptersCreated++;
+            if (Array.isArray(sub.chapters)) {
+              for (const chap of sub.chapters) {
+                await push(ref(db, "chapters"), {
+                  subjectId: subRef.key,
+                  title: chap.title,
+                  progress: chap.progress || 0,
+                  status: chap.status || 'not_started',
+                  priority: chap.priority || 'medium',
+                  estimatedTime: chap.estimatedTime || "",
+                  targetDate: chap.targetDate || "",
+                  notes: chap.notes || "",
+                  createdAt: now,
+                  updatedAt: now,
+                });
+                chaptersCreated++;
+              }
             }
           }
           
