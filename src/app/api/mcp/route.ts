@@ -48,11 +48,12 @@ const handler = createMcpHandler(
     );
 
     server.registerTool(
-      "create_subject",
+      "upsert_subject",
       {
-        title: "Create Subject",
-        description: "Creates a new subject in the syllabus",
+        title: "Upsert Subject",
+        description: "Creates a new subject or updates an existing one. To update, provide the existing 'id' (call get_syllabus_state if you don't know it). To create a new subject, leave 'id' empty.",
         inputSchema: z.object({
+          id: z.string().optional().describe("Provide to update existing, omit to create new"),
           name: z.string().describe("Name of the subject (e.g. Physics)"),
           color: z.enum(['blue', 'red', 'emerald', 'amber', 'purple', 'rose']).optional().describe("Theme color")
         })
@@ -60,35 +61,21 @@ const handler = createMcpHandler(
       async (args) => {
         try {
           const now = new Date().toISOString();
-          const newRef = await push(ref(db, "subjects"), {
-            name: args.name,
-            color: args.color || "blue",
-            createdAt: now,
-            updatedAt: now,
-          });
-          return { content: [{ type: "text", text: `Subject created with ID: ${newRef.key}` }] };
-        } catch (error: any) {
-          return { content: [{ type: "text", text: `Error: ${error.message}` }], isError: true };
-        }
-      }
-    );
-
-    server.registerTool(
-      "update_subject",
-      {
-        title: "Update Subject",
-        description: "Updates an existing subject (e.g., renaming it). If you do not know the subject ID, call get_syllabus_state first to find it.",
-        inputSchema: z.object({
-          id: z.string(),
-          name: z.string().optional(),
-          color: z.string().optional()
-        })
-      },
-      async (args) => {
-        try {
-          const { id, ...updates } = args;
-          await update(ref(db, `subjects/${id}`), { ...updates, updatedAt: new Date().toISOString() });
-          return { content: [{ type: "text", text: `Subject ${id} updated` }] };
+          if (args.id) {
+            // Update
+            const { id, ...updates } = args;
+            await update(ref(db, `subjects/${id}`), { ...updates, updatedAt: now });
+            return { content: [{ type: "text", text: `Subject ${id} updated` }] };
+          } else {
+            // Create
+            const newRef = await push(ref(db, "subjects"), {
+              name: args.name,
+              color: args.color || "blue",
+              createdAt: now,
+              updatedAt: now,
+            });
+            return { content: [{ type: "text", text: `Subject created with ID: ${newRef.key}` }] };
+          }
         } catch (error: any) {
           return { content: [{ type: "text", text: `Error: ${error.message}` }], isError: true };
         }
@@ -113,13 +100,14 @@ const handler = createMcpHandler(
     );
 
     server.registerTool(
-      "create_chapter",
+      "upsert_chapter",
       {
-        title: "Create Chapter",
-        description: "Creates a new chapter within a subject",
+        title: "Upsert Chapter",
+        description: "Creates a new chapter or updates an existing one. To update, provide the existing 'id'. To create a new chapter, leave 'id' empty but you MUST provide 'subjectId' and 'title'.",
         inputSchema: z.object({
-          subjectId: z.string().describe("ID of the parent subject"),
-          title: z.string().describe("Chapter title"),
+          id: z.string().optional().describe("Provide to update existing, omit to create new"),
+          subjectId: z.string().optional().describe("ID of the parent subject"),
+          title: z.string().optional().describe("Chapter title"),
           progress: z.number().min(0).max(100).optional().describe("Completion percentage 0-100"),
           status: z.enum(['not_started', 'in_progress', 'revision', 'completed']).optional(),
           priority: z.enum(['low', 'medium', 'high']).optional(),
@@ -131,55 +119,37 @@ const handler = createMcpHandler(
       async (args) => {
         try {
           const now = new Date().toISOString();
-          const newRef = await push(ref(db, "chapters"), {
-            subjectId: args.subjectId,
-            title: args.title,
-            progress: args.progress || 0,
-            status: args.status || 'not_started',
-            priority: args.priority || 'medium',
-            estimatedTime: args.estimatedTime || "",
-            targetDate: args.targetDate || "",
-            notes: args.notes || "",
-            createdAt: now,
-            updatedAt: now,
-          });
-          return { content: [{ type: "text", text: `Chapter created with ID: ${newRef.key}` }] };
-        } catch (error: any) {
-          return { content: [{ type: "text", text: `Error: ${error.message}` }], isError: true };
-        }
-      }
-    );
-
-    server.registerTool(
-      "update_chapter",
-      {
-        title: "Update Chapter",
-        description: "Updates properties of a chapter (progress, status, notes, etc.). If you do not know the chapter ID, call get_syllabus_state first to find it.",
-        inputSchema: z.object({
-          id: z.string(),
-          subjectId: z.string().optional(),
-          title: z.string().optional(),
-          progress: z.number().min(0).max(100).optional(),
-          status: z.enum(['not_started', 'in_progress', 'revision', 'completed']).optional(),
-          priority: z.enum(['low', 'medium', 'high']).optional(),
-          estimatedTime: z.string().optional(),
-          targetDate: z.string().optional(),
-          notes: z.string().optional()
-        })
-      },
-      async (args) => {
-        try {
-          const { id, ...updates } = args;
-          const finalUpdates = { ...updates, updatedAt: new Date().toISOString() };
           
-          if (finalUpdates.status === 'completed' && finalUpdates.progress === undefined) {
-             finalUpdates.progress = 100;
-          } else if (finalUpdates.progress === 100 && finalUpdates.status === undefined) {
-             finalUpdates.status = 'completed';
+          if (args.id) {
+            // Update
+            const { id, ...updates } = args;
+            const finalUpdates = { ...updates, updatedAt: now };
+            
+            if (finalUpdates.status === 'completed' && finalUpdates.progress === undefined) {
+               finalUpdates.progress = 100;
+            } else if (finalUpdates.progress === 100 && finalUpdates.status === undefined) {
+               finalUpdates.status = 'completed';
+            }
+            
+            await update(ref(db, `chapters/${id}`), finalUpdates);
+            return { content: [{ type: "text", text: `Chapter ${id} updated` }] };
+          } else {
+            // Create
+            if (!args.subjectId || !args.title) throw new Error("subjectId and title are required to create a new chapter");
+            const newRef = await push(ref(db, "chapters"), {
+              subjectId: args.subjectId,
+              title: args.title,
+              progress: args.progress || 0,
+              status: args.status || 'not_started',
+              priority: args.priority || 'medium',
+              estimatedTime: args.estimatedTime || "",
+              targetDate: args.targetDate || "",
+              notes: args.notes || "",
+              createdAt: now,
+              updatedAt: now,
+            });
+            return { content: [{ type: "text", text: `Chapter created with ID: ${newRef.key}` }] };
           }
-
-          await update(ref(db, `chapters/${id}`), finalUpdates);
-          return { content: [{ type: "text", text: `Chapter ${id} updated` }] };
         } catch (error: any) {
           return { content: [{ type: "text", text: `Error: ${error.message}` }], isError: true };
         }

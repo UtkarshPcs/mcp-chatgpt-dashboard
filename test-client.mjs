@@ -4,7 +4,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 async function main() {
   console.log("Connecting to MCP HTTP endpoint...");
   const transport = new StreamableHTTPClientTransport(
-    new URL("http://localhost:3000/api/mcp")
+    new URL("https://academics-dashboard.vercel.app/api/mcp")
   );
 
   const client = new Client(
