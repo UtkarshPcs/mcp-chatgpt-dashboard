@@ -14,7 +14,7 @@ const handler = createMcpHandler(
       "get_syllabus_state",
       {
         title: "Get Syllabus State",
-        description: "Retrieves the full syllabus hierarchy (Subjects and Chapters) along with the current AI Recommendation.",
+        description: "Retrieves the full syllabus hierarchy (Subjects and Chapters) along with their IDs. Always call this tool first if you need to update or delete a subject or chapter but don't know its ID.",
         inputSchema: z.object({})
       },
       async () => {
@@ -77,7 +77,7 @@ const handler = createMcpHandler(
       "update_subject",
       {
         title: "Update Subject",
-        description: "Updates an existing subject (e.g., renaming it)",
+        description: "Updates an existing subject (e.g., renaming it). If you do not know the subject ID, call get_syllabus_state first to find it.",
         inputSchema: z.object({
           id: z.string(),
           name: z.string().optional(),
@@ -99,7 +99,7 @@ const handler = createMcpHandler(
       "delete_subject",
       {
         title: "Delete Subject",
-        description: "Deletes a subject",
+        description: "Deletes a subject. If you do not know the subject ID, call get_syllabus_state first to find it.",
         inputSchema: z.object({ id: z.string() })
       },
       async (args) => {
@@ -154,7 +154,7 @@ const handler = createMcpHandler(
       "update_chapter",
       {
         title: "Update Chapter",
-        description: "Updates properties of a chapter (progress, status, notes, etc.)",
+        description: "Updates properties of a chapter (progress, status, notes, etc.). If you do not know the chapter ID, call get_syllabus_state first to find it.",
         inputSchema: z.object({
           id: z.string(),
           subjectId: z.string().optional(),
@@ -190,7 +190,7 @@ const handler = createMcpHandler(
       "delete_chapter",
       {
         title: "Delete Chapter",
-        description: "Deletes a chapter",
+        description: "Deletes a chapter. If you do not know the chapter ID, call get_syllabus_state first to find it.",
         inputSchema: z.object({ id: z.string() })
       },
       async (args) => {
@@ -207,7 +207,7 @@ const handler = createMcpHandler(
       "update_ai_recommendation",
       {
         title: "Update AI Recommendation",
-        description: "Updates the central AI Study Recommendation card telling the user exactly what to study next.",
+        description: "Updates the central AI Study Recommendation card. You MUST provide the correct chapterId and subjectId. If you do not know them, call get_syllabus_state first.",
         inputSchema: z.object({
           chapterId: z.string().describe("The ID of the recommended chapter"),
           subjectId: z.string().describe("The ID of the recommended subject"),
