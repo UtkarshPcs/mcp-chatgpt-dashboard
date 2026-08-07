@@ -1,17 +1,243 @@
 import { createMcpHandler } from "mcp-handler";
 import { z } from "zod";
-import { ref, push, update, remove, get } from "firebase/database";
+import { ref, push, update, remove, get, set } from "firebase/database";
 import { db } from "@/lib/firebase";
-import { Task, TaskStatus, TaskPriority } from "@/types";
+import { Task, TaskStatus, TaskPriority, Chapter, ChapterStatus, Subject, AIRecommendation } from "@/types";
 
 const handler = createMcpHandler(
   async (server) => {
-    // 1. get_dashboard_state
+    // ---------------------------------------------------------
+    // SYLLABUS TOOLS
+    // ---------------------------------------------------------
+    
     server.registerTool(
-      "get_dashboard_state",
+      "get_syllabus_state",
       {
-        title: "Get Dashboard State",
-        description: "Retrieves all tasks on the dashboard. Use this to understand the current state before making updates or when the user asks for a summary.",
+        title: "Get Syllabus State",
+        description: "Retrieves the full syllabus hierarchy (Subjects and Chapters) along with the current AI Recommendation.",
+        inputSchema: z.object({})
+      },
+      async () => {
+        try {
+          const [subSnap, chapSnap, recSnap] = await Promise.all([
+            get(ref(db, "subjects")),
+            get(ref(db, "chapters")),
+            get(ref(db, "recommendation"))
+          ]);
+          
+          const parseNode = (snap: any) => {
+            const data = snap.val();
+            if (!data) return [];
+            return Object.keys(data).map(key => ({ id: key, ...data[key] }));
+          };
+          
+          return {
+            content: [{ 
+              type: "text", 
+              text: JSON.stringify({
+                subjects: parseNode(subSnap),
+                chapters: parseNode(chapSnap),
+                recommendation: recSnap.val() || null
+              }, null, 2) 
+            }],
+          };
+        } catch (error: any) {
+          return { content: [{ type: "text", text: `Error: ${error.message}` }], isError: true };
+        }
+      }
+    );
+
+    server.registerTool(
+      "create_subject",
+      {
+        title: "Create Subject",
+        description: "Creates a new subject in the syllabus",
+        inputSchema: z.object({
+          name: z.string().describe("Name of the subject (e.g. Physics)"),
+          color: z.enum(['blue', 'red', 'emerald', 'amber', 'purple', 'rose']).optional().describe("Theme color")
+        })
+      },
+      async (args) => {
+        try {
+          const now = new Date().toISOString();
+          const newRef = await push(ref(db, "subjects"), {
+            name: args.name,
+            color: args.color || "blue",
+            createdAt: now,
+            updatedAt: now,
+          });
+          return { content: [{ type: "text", text: `Subject created with ID: ${newRef.key}` }] };
+        } catch (error: any) {
+          return { content: [{ type: "text", text: `Error: ${error.message}` }], isError: true };
+        }
+      }
+    );
+
+    server.registerTool(
+      "update_subject",
+      {
+        title: "Update Subject",
+        description: "Updates an existing subject (e.g., renaming it)",
+        inputSchema: z.object({
+          id: z.string(),
+          name: z.string().optional(),
+          color: z.string().optional()
+        })
+      },
+      async (args) => {
+        try {
+          const { id, ...updates } = args;
+          await update(ref(db, `subjects/${id}`), { ...updates, updatedAt: new Date().toISOString() });
+          return { content: [{ type: "text", text: `Subject ${id} updated` }] };
+        } catch (error: any) {
+          return { content: [{ type: "text", text: `Error: ${error.message}` }], isError: true };
+        }
+      }
+    );
+
+    server.registerTool(
+      "delete_subject",
+      {
+        title: "Delete Subject",
+        description: "Deletes a subject",
+        inputSchema: z.object({ id: z.string() })
+      },
+      async (args) => {
+        try {
+          await remove(ref(db, `subjects/${args.id}`));
+          return { content: [{ type: "text", text: `Subject ${args.id} deleted` }] };
+        } catch (error: any) {
+          return { content: [{ type: "text", text: `Error: ${error.message}` }], isError: true };
+        }
+      }
+    );
+
+    server.registerTool(
+      "create_chapter",
+      {
+        title: "Create Chapter",
+        description: "Creates a new chapter within a subject",
+        inputSchema: z.object({
+          subjectId: z.string().describe("ID of the parent subject"),
+          title: z.string().describe("Chapter title"),
+          progress: z.number().min(0).max(100).optional().describe("Completion percentage 0-100"),
+          status: z.enum(['not_started', 'in_progress', 'revision', 'completed']).optional(),
+          priority: z.enum(['low', 'medium', 'high']).optional(),
+          estimatedTime: z.string().optional(),
+          targetDate: z.string().optional(),
+          notes: z.string().optional()
+        })
+      },
+      async (args) => {
+        try {
+          const now = new Date().toISOString();
+          const newRef = await push(ref(db, "chapters"), {
+            subjectId: args.subjectId,
+            title: args.title,
+            progress: args.progress || 0,
+            status: args.status || 'not_started',
+            priority: args.priority || 'medium',
+            estimatedTime: args.estimatedTime || "",
+            targetDate: args.targetDate || "",
+            notes: args.notes || "",
+            createdAt: now,
+            updatedAt: now,
+          });
+          return { content: [{ type: "text", text: `Chapter created with ID: ${newRef.key}` }] };
+        } catch (error: any) {
+          return { content: [{ type: "text", text: `Error: ${error.message}` }], isError: true };
+        }
+      }
+    );
+
+    server.registerTool(
+      "update_chapter",
+      {
+        title: "Update Chapter",
+        description: "Updates properties of a chapter (progress, status, notes, etc.)",
+        inputSchema: z.object({
+          id: z.string(),
+          subjectId: z.string().optional(),
+          title: z.string().optional(),
+          progress: z.number().min(0).max(100).optional(),
+          status: z.enum(['not_started', 'in_progress', 'revision', 'completed']).optional(),
+          priority: z.enum(['low', 'medium', 'high']).optional(),
+          estimatedTime: z.string().optional(),
+          targetDate: z.string().optional(),
+          notes: z.string().optional()
+        })
+      },
+      async (args) => {
+        try {
+          const { id, ...updates } = args;
+          const finalUpdates = { ...updates, updatedAt: new Date().toISOString() };
+          
+          if (finalUpdates.status === 'completed' && finalUpdates.progress === undefined) {
+             finalUpdates.progress = 100;
+          } else if (finalUpdates.progress === 100 && finalUpdates.status === undefined) {
+             finalUpdates.status = 'completed';
+          }
+
+          await update(ref(db, `chapters/${id}`), finalUpdates);
+          return { content: [{ type: "text", text: `Chapter ${id} updated` }] };
+        } catch (error: any) {
+          return { content: [{ type: "text", text: `Error: ${error.message}` }], isError: true };
+        }
+      }
+    );
+
+    server.registerTool(
+      "delete_chapter",
+      {
+        title: "Delete Chapter",
+        description: "Deletes a chapter",
+        inputSchema: z.object({ id: z.string() })
+      },
+      async (args) => {
+        try {
+          await remove(ref(db, `chapters/${args.id}`));
+          return { content: [{ type: "text", text: `Chapter ${args.id} deleted` }] };
+        } catch (error: any) {
+          return { content: [{ type: "text", text: `Error: ${error.message}` }], isError: true };
+        }
+      }
+    );
+
+    server.registerTool(
+      "update_ai_recommendation",
+      {
+        title: "Update AI Recommendation",
+        description: "Updates the central AI Study Recommendation card telling the user exactly what to study next.",
+        inputSchema: z.object({
+          chapterId: z.string().describe("The ID of the recommended chapter"),
+          subjectId: z.string().describe("The ID of the recommended subject"),
+          reason: z.string().describe("A short compelling reason why they should study this now"),
+          estimatedTime: z.string().describe("Estimated time to complete this session"),
+          priority: z.enum(['low', 'medium', 'high'])
+        })
+      },
+      async (args) => {
+        try {
+          await set(ref(db, `recommendation`), {
+            ...args,
+            updatedAt: new Date().toISOString()
+          });
+          return { content: [{ type: "text", text: `AI Recommendation updated successfully` }] };
+        } catch (error: any) {
+          return { content: [{ type: "text", text: `Error: ${error.message}` }], isError: true };
+        }
+      }
+    );
+
+    // ---------------------------------------------------------
+    // TASKS TOOLS (kept for backwards compatibility/hybrid use)
+    // ---------------------------------------------------------
+
+    server.registerTool(
+      "get_tasks",
+      {
+        title: "Get Dashboard Tasks",
+        description: "Retrieves all standalone tasks.",
         inputSchema: z.object({})
       },
       async () => {
@@ -28,31 +254,27 @@ const handler = createMcpHandler(
             content: [{ type: "text", text: JSON.stringify(tasks, null, 2) }],
           };
         } catch (error: any) {
-          return {
-            content: [{ type: "text", text: `Error fetching state: ${error.message}` }],
-            isError: true,
-          };
+          return { content: [{ type: "text", text: `Error: ${error.message}` }], isError: true };
         }
       }
     );
 
-    // 2. create_task
     server.registerTool(
       "create_task",
       {
         title: "Create Task",
-        description: "Creates a new academic task",
+        description: "Creates a new standalone academic task",
         inputSchema: z.object({
-          title: z.string().describe("Task title"),
-          subject: z.string().optional().describe("Subject (e.g. Physics)"),
-          chapter: z.string().optional().describe("Chapter name or number"),
-          description: z.string().optional().describe("Detailed description"),
-          status: z.enum(["current", "upcoming", "backlog", "completed"]).optional().describe("Task section (default: upcoming)"),
-          priority: z.enum(["low", "medium", "high"]).optional().describe("Priority level (default: medium)"),
-          estimatedTime: z.string().optional().describe("Estimated time (e.g. 2 hours)"),
-          dueDate: z.string().optional().describe("Due date in ISO format"),
-          notes: z.string().optional().describe("Additional notes"),
-          tags: z.array(z.string()).optional().describe("Tags")
+          title: z.string(),
+          subject: z.string().optional(),
+          chapter: z.string().optional(),
+          description: z.string().optional(),
+          status: z.enum(["current", "upcoming", "backlog", "completed"]).optional(),
+          priority: z.enum(["low", "medium", "high"]).optional(),
+          estimatedTime: z.string().optional(),
+          dueDate: z.string().optional(),
+          notes: z.string().optional(),
+          tags: z.array(z.string()).optional()
         })
       },
       async (args) => {
@@ -74,114 +296,52 @@ const handler = createMcpHandler(
             updatedAt: now,
           };
 
-          const newTaskRef = await push(ref(db, "tasks"), taskData);
-          return {
-            content: [{ type: "text", text: `Task created successfully with ID: ${newTaskRef.key}` }],
-          };
+          const newRef = await push(ref(db, "tasks"), taskData);
+          return { content: [{ type: "text", text: `Task created with ID: ${newRef.key}` }] };
         } catch (error: any) {
-          return {
-            content: [{ type: "text", text: `Error creating task: ${error.message}` }],
-            isError: true,
-          };
+          return { content: [{ type: "text", text: `Error: ${error.message}` }], isError: true };
         }
       }
     );
 
-    // 3. update_task
     server.registerTool(
       "update_task",
       {
         title: "Update Task",
         description: "Updates properties of an existing task.",
         inputSchema: z.object({
-          id: z.string().describe("Task ID to update"),
+          id: z.string(),
           title: z.string().optional(),
-          subject: z.string().optional(),
-          chapter: z.string().optional(),
-          description: z.string().optional(),
           status: z.enum(["current", "upcoming", "backlog", "completed"]).optional(),
-          progress: z.number().min(0).max(100).optional().describe("Progress percentage (0-100)"),
-          priority: z.enum(["low", "medium", "high"]).optional(),
-          estimatedTime: z.string().optional(),
-          dueDate: z.string().optional(),
-          notes: z.string().optional(),
-          tags: z.array(z.string()).optional()
+          progress: z.number().min(0).max(100).optional(),
+          priority: z.enum(["low", "medium", "high"]).optional()
         })
       },
       async (args) => {
         try {
           const { id, ...updates } = args;
           const updatesWithTime = { ...updates, updatedAt: new Date().toISOString() };
-          
-          if (updates.status === 'completed' && updates.progress === undefined) {
-             updatesWithTime.progress = 100;
-          }
-          
           await update(ref(db, `tasks/${id}`), updatesWithTime);
-          return {
-            content: [{ type: "text", text: `Task ${id} updated successfully` }],
-          };
+          return { content: [{ type: "text", text: `Task ${id} updated` }] };
         } catch (error: any) {
-          return {
-            content: [{ type: "text", text: `Error updating task: ${error.message}` }],
-            isError: true,
-          };
+          return { content: [{ type: "text", text: `Error: ${error.message}` }], isError: true };
         }
       }
     );
 
-    // 4. update_task_status
-    server.registerTool(
-      "update_task_status",
-      {
-        title: "Update Task Status",
-        description: "Quickly move a task to a different section (e.g. to Current Focus, Completed, etc.)",
-        inputSchema: z.object({
-          id: z.string().describe("Task ID"),
-          status: z.enum(["current", "upcoming", "backlog", "completed"]).describe("New status")
-        })
-      },
-      async (args) => {
-        try {
-          const updates: any = { 
-            status: args.status, 
-            updatedAt: new Date().toISOString() 
-          };
-          if (args.status === 'completed') updates.progress = 100;
-          await update(ref(db, `tasks/${args.id}`), updates);
-          return {
-            content: [{ type: "text", text: `Task ${args.id} moved to ${args.status}` }],
-          };
-        } catch (error: any) {
-          return {
-            content: [{ type: "text", text: `Error updating status: ${error.message}` }],
-            isError: true,
-          };
-        }
-      }
-    );
-
-    // 5. delete_task
     server.registerTool(
       "delete_task",
       {
         title: "Delete Task",
         description: "Deletes a task completely.",
-        inputSchema: z.object({
-          id: z.string().describe("Task ID to delete")
-        })
+        inputSchema: z.object({ id: z.string() })
       },
       async (args) => {
         try {
           await remove(ref(db, `tasks/${args.id}`));
-          return {
-            content: [{ type: "text", text: `Task ${args.id} deleted successfully` }],
-          };
+          return { content: [{ type: "text", text: `Task ${args.id} deleted` }] };
         } catch (error: any) {
-          return {
-            content: [{ type: "text", text: `Error deleting task: ${error.message}` }],
-            isError: true,
-          };
+          return { content: [{ type: "text", text: `Error: ${error.message}` }], isError: true };
         }
       }
     );
