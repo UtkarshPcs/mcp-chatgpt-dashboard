@@ -55,6 +55,7 @@ const handler = createMcpHandler(
         inputSchema: z.object({
           id: z.string().optional().describe("Provide to update existing, omit to create new"),
           name: z.string().describe("Name of the subject (e.g. Physics)"),
+          section: z.enum(['Science', 'Mathematics', 'Social Science (SST)', 'English', 'Hindi', 'Information Technology (IT)', 'Other']).optional().describe("Parent section"),
           color: z.enum(['blue', 'red', 'emerald', 'amber', 'purple', 'rose']).optional().describe("Theme color")
         })
       },
@@ -70,6 +71,7 @@ const handler = createMcpHandler(
             // Create
             const newRef = await push(ref(db, "subjects"), {
               name: args.name,
+              section: args.section || 'Other',
               color: args.color || "blue",
               createdAt: now,
               updatedAt: now,
@@ -194,6 +196,7 @@ const handler = createMcpHandler(
           for (const sub of parsedData.subjects) {
             const subRef = await push(ref(db, "subjects"), {
               name: sub.name,
+              section: sub.section || 'Other',
               color: sub.color || "blue",
               createdAt: now,
               updatedAt: now,

@@ -34,9 +34,12 @@ export interface Chapter {
   updatedAt: string;
 }
 
+export type Section = 'Science' | 'Mathematics' | 'Social Science (SST)' | 'English' | 'Hindi' | 'Information Technology (IT)' | 'Other';
+
 export interface Subject {
   id: string;
   name: string;
+  section: Section;
   color?: string; // e.g., 'blue', 'red', 'emerald'
   createdAt: string;
   updatedAt: string;
