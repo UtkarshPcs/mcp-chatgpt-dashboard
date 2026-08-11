@@ -30,6 +30,9 @@ export interface Chapter {
   estimatedTime?: string;
   targetDate?: string;
   notes?: string;
+  nextRevisionDate?: string;
+  lastRevisionDate?: string;
+  revisionCount?: number;
   createdAt: string;
   updatedAt: string;
 }
