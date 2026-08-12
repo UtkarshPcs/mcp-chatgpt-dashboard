@@ -134,12 +134,15 @@ export default function Home() {
     .filter(c => c.nextRevisionDate)
     .sort((a, b) => new Date(a.nextRevisionDate!).getTime() - new Date(b.nextRevisionDate!).getTime());
 
-  const filteredRevisions = upcomingRevisions.filter(chapter => {
+  const subjectFilteredRevisions = upcomingRevisions.filter(chapter => {
     const subject = subjects.find(s => s.id === chapter.subjectId);
     if (!subject) return false;
     if (revFilterSection !== 'All' && subject.section !== revFilterSection) return false;
     if (revFilterSubject !== 'All' && subject.id !== revFilterSubject) return false;
-    
+    return true;
+  });
+
+  const filteredRevisions = subjectFilteredRevisions.filter(chapter => {
     if (revView === 'calendar' && selectedDate) {
       const revDate = new Date(chapter.nextRevisionDate!);
       revDate.setHours(0,0,0,0);
@@ -335,7 +338,7 @@ export default function Home() {
                 {calendarDays.map((d, i) => {
                   const isSelected = new Date(selectedDate).toDateString() === d.toDateString();
                   const isToday = new Date().toDateString() === d.toDateString();
-                  const hasRevision = upcomingRevisions.some(c => {
+                  const hasRevision = subjectFilteredRevisions.some(c => {
                     const cd = new Date(c.nextRevisionDate!);
                     return cd.toDateString() === d.toDateString();
                   });
