@@ -12,8 +12,8 @@ async function run() {
     get(ref(db, "chapters"))
   ]);
   
-  console.log("Subjects:");
-  console.dir(subSnap.val(), {depth: null});
+  console.log("Chapters:");
+  console.dir(chapSnap.val(), {depth: null});
   process.exit(0);
 }
 run();

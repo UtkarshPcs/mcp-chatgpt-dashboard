@@ -116,7 +116,10 @@ const handler = createMcpHandler(
             priority: z.enum(['low', 'medium', 'high']).optional(),
             estimatedTime: z.string().optional(),
             targetDate: z.string().optional(),
-            notes: z.string().optional()
+            notes: z.string().optional(),
+            lastRevisionDate: z.string().optional(),
+            nextRevisionDate: z.string().optional(),
+            revisionCount: z.number().optional()
           }))
         })
       },
@@ -154,6 +157,9 @@ const handler = createMcpHandler(
                 estimatedTime: chap.estimatedTime || "",
                 targetDate: chap.targetDate || "",
                 notes: chap.notes || "",
+                lastRevisionDate: chap.lastRevisionDate || "",
+                nextRevisionDate: chap.nextRevisionDate || "",
+                revisionCount: chap.revisionCount || 0,
                 createdAt: now,
                 updatedAt: now,
               });
@@ -266,6 +272,42 @@ const handler = createMcpHandler(
             updatedAt: new Date().toISOString()
           });
           return { content: [{ type: "text", text: `AI Recommendation updated successfully` }] };
+        } catch (error: any) {
+          return { content: [{ type: "text", text: `Error: ${error.message}` }], isError: true };
+        }
+      }
+    );
+
+    server.registerTool(
+      "record_chapter_revision",
+      {
+        title: "Record Chapter Revision",
+        description: "Updates a chapter's revision dates. ALWAYS use this tool when the user completes a revision, rather than updating notes. You MUST calculate the nextRevisionDate based on spaced repetition (e.g., 1st revision = +1 day, 2nd = +3 days, 3rd = +7 days).",
+        inputSchema: z.object({
+          id: z.string().describe("The ID of the chapter being revised"),
+          lastRevisionDate: z.string().describe("ISO date string for when this revision was completed (e.g. 2026-08-12T00:00:00.000Z)"),
+          nextRevisionDate: z.string().describe("ISO date string for the next scheduled revision based on spaced repetition")
+        })
+      },
+      async (args) => {
+        try {
+          const snap = await get(ref(db, `chapters/${args.id}`));
+          if (!snap.exists()) {
+             return { content: [{ type: "text", text: `Error: Chapter ${args.id} not found` }], isError: true };
+          }
+          
+          const chapter = snap.val();
+          const currentCount = chapter.revisionCount || 0;
+          
+          await update(ref(db, `chapters/${args.id}`), {
+            lastRevisionDate: args.lastRevisionDate,
+            nextRevisionDate: args.nextRevisionDate,
+            revisionCount: currentCount + 1,
+            status: "revision",
+            updatedAt: new Date().toISOString()
+          });
+          
+          return { content: [{ type: "text", text: `Successfully recorded revision for chapter ${args.id}. Next revision scheduled for ${args.nextRevisionDate}.` }] };
         } catch (error: any) {
           return { content: [{ type: "text", text: `Error: ${error.message}` }], isError: true };
         }

@@ -105,6 +105,28 @@ export default function Home() {
   const notStartedCount = chapters.filter(c => c.status === 'not_started').length;
 
   const upcomingRevisions = chapters
+    .map(c => {
+      let nextRev = c.nextRevisionDate;
+      let lastRev = c.lastRevisionDate;
+      
+      // Fallback: ChatGPT might save dates in the notes field
+      if (!nextRev && c.notes) {
+        const nextMatch = c.notes.match(/Next revision:\s*([A-Za-z]+\s+\d{1,2})/i);
+        if (nextMatch) {
+          const parsedDate = new Date(`${nextMatch[1]} ${new Date().getFullYear()}`);
+          if (!isNaN(parsedDate.getTime())) nextRev = parsedDate.toISOString();
+        }
+      }
+      if (!lastRev && c.notes) {
+        const lastMatch = c.notes.match(/Revised on\s*([A-Za-z]+\s+\d{1,2})/i);
+        if (lastMatch) {
+          const parsedDate = new Date(`${lastMatch[1]} ${new Date().getFullYear()}`);
+          if (!isNaN(parsedDate.getTime())) lastRev = parsedDate.toISOString();
+        }
+      }
+      
+      return { ...c, nextRevisionDate: nextRev, lastRevisionDate: lastRev };
+    })
     .filter(c => c.nextRevisionDate)
     .sort((a, b) => new Date(a.nextRevisionDate!).getTime() - new Date(b.nextRevisionDate!).getTime());
 
