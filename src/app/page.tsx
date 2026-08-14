@@ -7,7 +7,7 @@ import { Subject, Chapter, AIRecommendation, Section } from "@/types";
 import { 
   BookOpen, Target, Clock, Sparkles, 
   BrainCircuit, BarChart3, Loader2, CheckCircle2, ChevronDown, ChevronRight,
-  CalendarClock, Filter, Calendar as CalendarIcon, List
+  CalendarClock, Filter, Calendar as CalendarIcon, List, ChevronLeft
 } from "lucide-react";
 
 const SECTIONS: Section[] = [
@@ -32,6 +32,7 @@ export default function Home() {
   const [revFilterSection, setRevFilterSection] = useState<string>('All');
   const [revFilterSubject, setRevFilterSubject] = useState<string>('All');
   const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString());
+  const [calendarMonth, setCalendarMonth] = useState<Date>(new Date());
 
   useEffect(() => {
     const subsRef = ref(db, "subjects");
@@ -153,12 +154,14 @@ export default function Home() {
     return true;
   });
 
-  // Generate 14 days for calendar view
-  const calendarDays = Array.from({ length: 14 }).map((_, i) => {
-    const d = new Date();
-    d.setDate(d.getDate() + i - 3); // Start 3 days ago
-    return d;
-  });
+  // Generate all days for the selected calendar month
+  const getDaysInMonth = (date: Date) => {
+    const year = date.getFullYear();
+    const month = date.getMonth();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    return Array.from({ length: daysInMonth }).map((_, i) => new Date(year, month, i + 1));
+  };
+  const calendarDays = getDaysInMonth(calendarMonth);
 
   return (
     <main className="min-h-screen bg-zinc-950 text-white font-sans p-4 md:p-8 selection:bg-blue-500/30">
@@ -334,31 +337,50 @@ export default function Home() {
             </div>
 
             {revView === 'calendar' && (
-              <div className="flex items-center gap-2 overflow-x-auto pb-4 mb-2 custom-scrollbar relative z-10">
-                {calendarDays.map((d, i) => {
-                  const isSelected = new Date(selectedDate).toDateString() === d.toDateString();
-                  const isToday = new Date().toDateString() === d.toDateString();
-                  const hasRevision = subjectFilteredRevisions.some(c => {
-                    const cd = new Date(c.nextRevisionDate!);
-                    return cd.toDateString() === d.toDateString();
-                  });
-                  
-                  return (
-                    <button
-                      key={i}
-                      onClick={() => setSelectedDate(d.toISOString())}
-                      className={`flex flex-col items-center justify-center min-w-[50px] p-2 rounded-xl border transition-colors ${
-                        isSelected ? 'bg-purple-500/20 border-purple-500/50 text-purple-300' : 
-                        isToday ? 'bg-zinc-800 border-zinc-700 text-zinc-300' : 
-                        'bg-zinc-900/50 border-zinc-800/50 text-zinc-500 hover:bg-zinc-800'
-                      }`}
-                    >
-                      <span className="text-[10px] uppercase font-bold">{d.toLocaleDateString(undefined, { weekday: 'short' })}</span>
-                      <span className="text-lg font-bold">{d.getDate()}</span>
-                      <div className="h-1.5 w-1.5 rounded-full mt-1 bg-purple-500" style={{ opacity: hasRevision ? 1 : 0 }} />
-                    </button>
-                  );
-                })}
+              <div className="flex flex-col gap-3 mb-2 relative z-10">
+                <div className="flex items-center justify-between text-zinc-300">
+                  <button 
+                    onClick={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() - 1, 1))}
+                    className="p-1.5 hover:bg-zinc-800 rounded-md transition-colors"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+                  <span className="text-sm font-bold tracking-wide uppercase text-zinc-400">
+                    {calendarMonth.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}
+                  </span>
+                  <button 
+                    onClick={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 1))}
+                    className="p-1.5 hover:bg-zinc-800 rounded-md transition-colors"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+                <div className="flex items-center gap-2 overflow-x-auto pb-4 custom-scrollbar">
+                  {calendarDays.map((d, i) => {
+                    const isSelected = new Date(selectedDate).toDateString() === d.toDateString();
+                    const isToday = new Date().toDateString() === d.toDateString();
+                    const hasRevision = subjectFilteredRevisions.some(c => {
+                      const cd = new Date(c.nextRevisionDate!);
+                      return cd.toDateString() === d.toDateString();
+                    });
+                    
+                    return (
+                      <button
+                        key={i}
+                        onClick={() => setSelectedDate(d.toISOString())}
+                        className={`flex flex-col items-center justify-center min-w-[50px] p-2 rounded-xl border transition-colors ${
+                          isSelected ? 'bg-purple-500/20 border-purple-500/50 text-purple-300' : 
+                          isToday ? 'bg-zinc-800 border-zinc-700 text-zinc-300' : 
+                          'bg-zinc-900/50 border-zinc-800/50 text-zinc-500 hover:bg-zinc-800'
+                        }`}
+                      >
+                        <span className="text-[10px] uppercase font-bold">{d.toLocaleDateString(undefined, { weekday: 'short' })}</span>
+                        <span className="text-lg font-bold">{d.getDate()}</span>
+                        <div className="h-1.5 w-1.5 rounded-full mt-1 bg-purple-500" style={{ opacity: hasRevision ? 1 : 0 }} />
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             )}
             
