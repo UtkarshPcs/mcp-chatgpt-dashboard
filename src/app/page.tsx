@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ref, onValue } from "firebase/database";
+import { ref, onValue, update } from "firebase/database";
 import { db } from "@/lib/firebase";
 import { Subject, Chapter, AIRecommendation, Section } from "@/types";
 import { 
@@ -92,6 +92,30 @@ export default function Home() {
     return Math.round(total / chaps.length);
   };
 
+  const calculateRevisionProgress = (chaps: Chapter[]) => {
+    if (chaps.length === 0) return 0;
+    const totalPossibleRevisions = chaps.length * 3;
+    const currentRevisions = chaps.reduce((acc, curr) => acc + Math.min(curr.revisionCount || 0, 3), 0);
+    return Math.round((currentRevisions / totalPossibleRevisions) * 100);
+  };
+
+  const handleCompleteRevision = async (chapter: Chapter) => {
+    const currentCount = chapter.revisionCount || 0;
+    if (currentCount >= 3) return; // Block if already reached 3
+
+    const updates: any = {
+      [`chapters/${chapter.id}/revisionCount`]: currentCount + 1,
+      [`chapters/${chapter.id}/lastRevisionDate`]: new Date().toISOString(),
+      [`chapters/${chapter.id}/nextRevisionDate`]: null,
+    };
+
+    try {
+      await update(ref(db), updates);
+    } catch (e) {
+      console.error("Error updating revision", e);
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-zinc-950 flex flex-col items-center justify-center text-zinc-400">
@@ -105,6 +129,7 @@ export default function Home() {
   const recChapter = recommendation ? chapters.find(c => c.id === recommendation.chapterId) : null;
 
   const overallCompletion = calculateCompletion(chapters);
+  const overallRevisionCompletion = calculateRevisionProgress(chapters);
   const completedChaptersCount = chapters.filter(c => c.status === 'completed').length;
   const inProgressCount = chapters.filter(c => c.status === 'in_progress' || c.status === 'revision').length;
   const notStartedCount = chapters.filter(c => c.status === 'not_started').length;
@@ -194,7 +219,7 @@ export default function Home() {
           <div className="col-span-1 lg:col-span-1 bg-zinc-900/50 border border-zinc-800 rounded-3xl p-6 flex flex-col items-center justify-center relative overflow-hidden">
              <div className="absolute top-0 right-0 -mt-10 -mr-10 w-40 h-40 bg-blue-500/10 blur-3xl rounded-full pointer-events-none"></div>
              <h2 className="text-zinc-400 font-semibold mb-6">Overall Syllabus</h2>
-             <div className="relative w-40 h-40 flex items-center justify-center mb-2">
+             <div className="relative w-40 h-40 flex items-center justify-center mb-4">
                 <svg className="w-full h-full transform -rotate-90" viewBox="0 0 36 36">
                   <path
                     className="text-zinc-800"
@@ -211,6 +236,15 @@ export default function Home() {
                 <div className="absolute flex flex-col items-center">
                   <span className="text-4xl font-bold text-white">{overallCompletion}%</span>
                   <span className="text-xs text-zinc-500 mt-1">COMPLETED</span>
+                </div>
+              </div>
+              <div className="w-full mt-2">
+                <div className="flex justify-between items-center mb-1">
+                  <span className="text-xs font-semibold text-purple-400">Revisions (Max 3)</span>
+                  <span className="text-xs font-bold text-zinc-300">{overallRevisionCompletion}%</span>
+                </div>
+                <div className="w-full bg-zinc-800 rounded-full h-2">
+                  <div className="h-2 rounded-full bg-gradient-to-r from-purple-500 to-indigo-400 transition-all duration-1000 ease-out" style={{ width: `${overallRevisionCompletion}%` }}></div>
                 </div>
               </div>
           </div>
@@ -400,23 +434,38 @@ export default function Home() {
                 const isToday = daysUntil === 0;
 
                 return (
-                  <div key={chapter.id} className="bg-zinc-900/50 p-3 rounded-xl border border-zinc-800/50 flex justify-between items-center group hover:border-purple-500/30 transition-colors">
+                  <div key={chapter.id} className="bg-zinc-900/50 p-3 rounded-xl border border-zinc-800/50 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 group hover:border-purple-500/30 transition-colors">
                     <div className="flex flex-col gap-1">
-                      <span className={`text-[10px] font-bold uppercase tracking-wider ${getSubjectText(subject.color)}`}>
-                        {subject.name}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className={`text-[10px] font-bold uppercase tracking-wider ${getSubjectText(subject.color)}`}>
+                          {subject.name}
+                        </span>
+                        {isOverdue && (
+                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-sm uppercase tracking-wider bg-red-500/20 text-red-400 border border-red-500/30">Delayed</span>
+                        )}
+                      </div>
                       <span className="text-sm font-medium text-zinc-200 line-clamp-1" title={chapter.title}>
                         {chapter.title}
                       </span>
                     </div>
-                    <div className="flex flex-col items-end flex-shrink-0 ml-4">
-                      <span className={`text-[10px] font-bold px-2 py-1 rounded-md uppercase tracking-wider ${
-                        isOverdue ? 'bg-red-500/10 text-red-400 border border-red-500/20' :
-                        isToday ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' :
-                        'bg-zinc-800 text-zinc-400 border border-zinc-700/50'
-                      }`}>
-                        {isOverdue ? `${Math.abs(daysUntil)}d Overdue` : isToday ? 'Today' : `in ${daysUntil}d`}
-                      </span>
+                    <div className="flex items-center justify-between sm:flex-col sm:items-end flex-shrink-0 ml-0 sm:ml-4">
+                      <div className="flex items-center gap-2">
+                        <span className={`text-[10px] font-bold px-2 py-1 rounded-md uppercase tracking-wider ${
+                          isOverdue ? 'bg-red-500/10 text-red-400 border border-red-500/20' :
+                          isToday ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' :
+                          'bg-zinc-800 text-zinc-400 border border-zinc-700/50'
+                        }`}>
+                          {isOverdue ? `${Math.abs(daysUntil)}d Overdue` : isToday ? 'Today' : `in ${daysUntil}d`}
+                        </span>
+                        <button
+                          onClick={() => handleCompleteRevision(chapter)}
+                          disabled={(chapter.revisionCount || 0) >= 3}
+                          className="bg-purple-500/20 hover:bg-purple-500/30 text-purple-400 p-1.5 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                          title="Mark Revision Complete"
+                        >
+                          <CheckCircle2 className="w-4 h-4" />
+                        </button>
+                      </div>
                       {chapter.lastRevisionDate && (
                         <span className="text-[9px] text-zinc-500 mt-1 uppercase font-semibold">
                           Last: {new Date(chapter.lastRevisionDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
@@ -501,6 +550,9 @@ export default function Home() {
                                           {chapter.title}
                                         </span>
                                         <div className="flex items-center gap-2 flex-shrink-0">
+                                          <span className="text-[10px] uppercase font-bold text-indigo-400 bg-indigo-400/10 px-1.5 py-0.5 rounded border border-indigo-400/20">
+                                            {Math.min(chapter.revisionCount || 0, 3)}/3 Rev
+                                          </span>
                                           {chapter.status === 'revision' && <span className="text-[10px] uppercase font-bold text-purple-400 bg-purple-400/10 px-1.5 py-0.5 rounded border border-purple-400/20">Revise</span>}
                                           {chapter.status === 'completed' && <CheckCircle2 className="w-4 h-4 text-emerald-500" />}
                                           {chapter.status !== 'completed' && <span className="text-xs text-zinc-500 font-medium">{chapter.progress}%</span>}

@@ -314,6 +314,71 @@ const handler = createMcpHandler(
       }
     );
 
+    server.registerTool(
+      "get_delayed_revisions",
+      {
+        title: "Get Delayed Revisions",
+        description: "Retrieves all chapters that have a scheduled revision date that has already passed.",
+        inputSchema: z.object({})
+      },
+      async () => {
+        try {
+          const chapSnap = await get(ref(db, "chapters"));
+          const data = chapSnap.val();
+          if (!data) return { content: [{ type: "text", text: "[]" }] };
+          
+          const now = new Date();
+          now.setHours(0, 0, 0, 0);
+          
+          const delayed = Object.keys(data).map(key => ({ id: key, ...data[key] })).filter(c => {
+             if (!c.nextRevisionDate) return false;
+             const revDate = new Date(c.nextRevisionDate);
+             revDate.setHours(0, 0, 0, 0);
+             return revDate.getTime() < now.getTime();
+          });
+          
+          return { content: [{ type: "text", text: JSON.stringify(delayed, null, 2) }] };
+        } catch (error: any) {
+          return { content: [{ type: "text", text: `Error: ${error.message}` }], isError: true };
+        }
+      }
+    );
+
+    server.registerTool(
+      "mark_revision_complete",
+      {
+        title: "Mark Revision Complete",
+        description: "Marks a chapter's pending revision as completed. It increments the revision count (max 3), updates lastRevisionDate to today, and clears nextRevisionDate.",
+        inputSchema: z.object({
+          id: z.string().describe("The ID of the chapter")
+        })
+      },
+      async (args) => {
+        try {
+          const snap = await get(ref(db, `chapters/${args.id}`));
+          if (!snap.exists()) {
+             return { content: [{ type: "text", text: `Error: Chapter ${args.id} not found` }], isError: true };
+          }
+          const chapter = snap.val();
+          const currentCount = chapter.revisionCount || 0;
+          if (currentCount >= 3) {
+             return { content: [{ type: "text", text: `Chapter ${args.id} has already reached the maximum of 3 revisions.` }] };
+          }
+          
+          await update(ref(db, `chapters/${args.id}`), {
+            revisionCount: currentCount + 1,
+            lastRevisionDate: new Date().toISOString(),
+            nextRevisionDate: null,
+            updatedAt: new Date().toISOString()
+          });
+          
+          return { content: [{ type: "text", text: `Successfully marked revision complete for chapter ${args.id}. Current revision count is now ${currentCount + 1}/3.` }] };
+        } catch (error: any) {
+          return { content: [{ type: "text", text: `Error: ${error.message}` }], isError: true };
+        }
+      }
+    );
+
   }
 );
 
