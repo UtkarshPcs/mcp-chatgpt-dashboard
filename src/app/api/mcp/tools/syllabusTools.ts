@@ -381,13 +381,13 @@ export const registerSyllabusTools = (server: any) => {
       title: "Manage Subject Task Template",
       description: "Creates, updates, or reorders the task framework for a specific subject. Overwrites the existing template. Provide an array of tasks with names, weights (must sum to 100), and order.",
       inputSchema: z.object({
-        subjectId: z.string(),
+        subjectId: z.string().describe("The unique ID of the subject to manage (e.g., 'physics_12')"),
         tasks: z.array(z.object({
           id: z.string().describe("A unique string ID for the task (e.g., 'physics_lecture')"),
           name: z.string().describe("Display name (e.g., 'Watch Lecture')"),
           weight: z.number().describe("Percentage weight of this task (0-100)"),
           order: z.number().describe("Sorting order")
-        }))
+        })).describe("The complete array of tasks that make up the framework for this subject")
       })
     },
     async (args: any) => {
@@ -420,9 +420,9 @@ export const registerSyllabusTools = (server: any) => {
       title: "Update Chapter Task Status",
       description: "Marks a specific task as completed or not_started for a particular chapter.",
       inputSchema: z.object({
-        chapterId: z.string(),
+        chapterId: z.string().describe("The unique ID of the chapter to update"),
         taskId: z.string().describe("The ID of the task from the subject's task template"),
-        status: z.enum(['completed', 'not_started'])
+        status: z.enum(['completed', 'not_started']).describe("The new completion status ('completed' or 'not_started')")
       })
     },
     async (args: any) => {
