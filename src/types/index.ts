@@ -70,3 +70,15 @@ export interface AIRecommendation {
   priority: TaskPriority;
   updatedAt: string;
 }
+
+export type ExamLocation = 'School' | 'Coaching';
+
+export interface Exam {
+  id: string;
+  name: string;
+  date: string; // ISO Date String
+  location: ExamLocation;
+  chapterIds: string[]; // References to actual chapter IDs
+  createdAt: string;
+  updatedAt: string;
+}

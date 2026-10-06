@@ -567,4 +567,117 @@ export const registerSyllabusTools = (server: any) => {
       }
     }
   );
+
+  // ---------------------------------------------------------
+  // EXAM TOOLS
+  // ---------------------------------------------------------
+
+  server.registerTool(
+    "get_exams",
+    {
+      title: "Get Upcoming Exams",
+      description: "Retrieves the list of upcoming exams and their full structured data (including exact chapter IDs). Use this to identify what syllabus is being tested next so you can prioritize incomplete chapters.",
+      inputSchema: z.object({})
+    },
+    async () => {
+      try {
+        const [subSnap, chapSnap, examSnap] = await Promise.all([
+          get(ref(db, "subjects")),
+          get(ref(db, "chapters")),
+          get(ref(db, "exams"))
+        ]);
+        
+        const parseNode = (snap: any) => {
+          const data = snap.val();
+          if (!data) return [];
+          return Object.keys(data).map(key => ({ id: key, ...data[key] }));
+        };
+        
+        return {
+          content: [{ 
+            type: "text", 
+            text: JSON.stringify({
+              subjects: parseNode(subSnap),
+              chapters: parseNode(chapSnap),
+              exams: parseNode(examSnap)
+            }, null, 2) 
+          }],
+        };
+      } catch (e: any) {
+        return { isError: true, content: [{ type: "text", text: `Error: ${e.message}` }] };
+      }
+    }
+  );
+
+  server.registerTool(
+    "upsert_exam",
+    {
+      title: "Upsert Exam",
+      description: "Creates or updates an exam record. The syllabus MUST be built only by providing an array of EXISTING chapter IDs from the dashboard. Do not use free text. Call get_syllabus_state first to find the valid chapter IDs.",
+      inputSchema: z.object({
+        id: z.string().optional().describe("Provide to update an existing exam, omit to create a new one"),
+        name: z.string().describe("The name of the exam (e.g., 'PST 1')"),
+        date: z.string().describe("ISO date string for when the exam occurs"),
+        location: z.enum(['School', 'Coaching']).describe("Where the exam takes place"),
+        chapterIds: z.array(z.string()).describe("Array of EXISTING chapter IDs that form the syllabus of this exam")
+      })
+    },
+    async (args: any) => {
+      try {
+        const now = new Date().toISOString();
+        
+        // Verify all chapter IDs actually exist
+        const chapSnap = await get(ref(db, "chapters"));
+        const allChapters = chapSnap.val() || {};
+        const validChapterIds = Object.keys(allChapters);
+        
+        for (const cid of args.chapterIds) {
+          if (!validChapterIds.includes(cid)) {
+            throw new Error(`Invalid chapter ID provided: ${cid}. You must select only existing chapter IDs from the dashboard.`);
+          }
+        }
+
+        if (args.id) {
+          // Update
+          const { id, ...updates } = args;
+          await update(ref(db, `exams/${id}`), { ...updates, updatedAt: now });
+          return { content: [{ type: "text", text: `Exam ${id} updated successfully.` }] };
+        } else {
+          // Create
+          const newRef = await push(ref(db, "exams"), {
+            name: args.name,
+            date: args.date,
+            location: args.location,
+            chapterIds: args.chapterIds,
+            createdAt: now,
+            updatedAt: now,
+          });
+          return { content: [{ type: "text", text: `Exam created successfully with ID: ${newRef.key}` }] };
+        }
+      } catch (error: any) {
+        return { content: [{ type: "text", text: `Error: ${error.message}` }], isError: true };
+      }
+    }
+  );
+
+
+  server.registerTool(
+    "delete_exam",
+    {
+      title: "Delete Exam",
+      description: "Deletes an upcoming exam.",
+      inputSchema: z.object({
+        id: z.string().describe("The ID of the exam to delete")
+      })
+    },
+    async (args: any) => {
+      try {
+        await remove(ref(db, `exams/${args.id}`));
+        return { content: [{ type: "text", text: `Exam ${args.id} deleted successfully.` }] };
+      } catch (error: any) {
+        return { content: [{ type: "text", text: `Error: ${error.message}` }], isError: true };
+      }
+    }
+  );
+
 };

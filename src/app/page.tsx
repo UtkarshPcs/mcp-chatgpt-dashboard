@@ -9,15 +9,16 @@ import { AIRecommendation } from "@/components/dashboard/AIRecommendation";
 import { UpcomingRevisions } from "@/components/dashboard/UpcomingRevisions";
 import { SyllabusBreakdown } from "@/components/syllabus/SyllabusBreakdown";
 import { SubjectFramework } from "@/components/syllabus/SubjectFramework";
+import { ExamStatus } from "@/components/dashboard/ExamStatus";
 import { Loader2 } from "lucide-react";
 
 export default function Home() {
-  const { subjects, chapters, recommendation, loading, handleCompleteRevision } = useSyllabusData();
+  const { subjects, chapters, recommendation, exams, loading, handleCompleteRevision } = useSyllabusData();
 
   const activeChapters = getActiveFrameworkChapters(chapters, subjects);
   const activeRec = getActiveRecommendation(recommendation, subjects);
 
-  const [activeTab, setActiveTab] = useState<'overview' | 'frameworks'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'frameworks' | 'exams'>('overview');
 
   if (loading) {
     return (
@@ -35,12 +36,18 @@ export default function Home() {
         <Header />
 
         {/* Navigation Tabs */}
-        <div className="flex border-b border-zinc-800">
+                <div className="flex border-b border-zinc-800">
           <button 
             onClick={() => setActiveTab('overview')}
             className={`px-6 py-3 font-medium text-sm transition-colors border-b-2 ${activeTab === 'overview' ? 'border-blue-500 text-blue-400' : 'border-transparent text-zinc-400 hover:text-zinc-200 hover:border-zinc-700'}`}
           >
             Dashboard Overview
+          </button>
+          <button 
+            onClick={() => setActiveTab('exams')}
+            className={`px-6 py-3 font-medium text-sm transition-colors border-b-2 ${activeTab === 'exams' ? 'border-indigo-500 text-indigo-400' : 'border-transparent text-zinc-400 hover:text-zinc-200 hover:border-zinc-700'}`}
+          >
+            Exam Status
           </button>
           <button 
             onClick={() => setActiveTab('frameworks')}
@@ -50,7 +57,7 @@ export default function Home() {
           </button>
         </div>
 
-        {activeTab === 'overview' ? (
+        {activeTab === 'overview' && (
           <>
             <AnalyticsOverview chapters={activeChapters} />
 
@@ -69,9 +76,9 @@ export default function Home() {
 
             <SyllabusBreakdown subjects={subjects} chapters={activeChapters} />
           </>
-        ) : (
-          <SubjectFramework subjects={subjects} />
         )}
+        {activeTab === 'frameworks' && <SubjectFramework subjects={subjects} />}
+        {activeTab === 'exams' && <ExamStatus exams={exams} chapters={activeChapters} subjects={subjects} />}
       </div>
     </main>
   );
