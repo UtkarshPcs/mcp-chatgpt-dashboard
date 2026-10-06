@@ -105,7 +105,7 @@ export function SyllabusBreakdown({ subjects, chapters }: SyllabusBreakdownProps
                                         {hasTasks ? (
                                           <span className="text-xs text-zinc-400 font-bold">{Math.round(taskCompletion)}%</span>
                                         ) : (
-                                          chapter.status !== 'completed' && <span className="text-xs text-zinc-500 font-medium">Legacy: {chapter.progress}%</span>
+                                          chapter.status !== 'completed' && <span className="text-xs text-zinc-500 font-medium">{chapter.progress}%</span>
                                         )}
                                       </div>
                                     </div>

@@ -2,16 +2,24 @@ import { z } from "zod";
 import { ref, push, update, remove, get, set } from "firebase/database";
 import { db } from "@/lib/firebase";
 
+const ensureSubjectFramework = async (subjectId: string) => {
+  const snap = await get(ref(db, `subjects/${subjectId}`));
+  const subject = snap.val();
+  if (!subject) throw new Error(`Subject with ID ${subjectId} not found.`);
+  if (!subject.tasks || subject.tasks.length === 0) {
+    throw new Error(`The subject '${subject.name}' does not have a Subject-wise Framework yet. The framework must first be created under the owner's guidance before this academic action can be performed. Do NOT fall back to legacy chapter records.`);
+  }
+  return subject;
+};
+
+
 export const registerSyllabusTools = (server: any) => {
-  // ---------------------------------------------------------
-  // SYLLABUS TOOLS
-  // ---------------------------------------------------------
 
   server.registerTool(
-    "get_syllabus_state",
+    "get_legacy_data",
     {
-      title: "Get Syllabus State",
-      description: "Retrieves the full syllabus hierarchy (Subjects and Chapters) along with their IDs. Always call this tool first if you need to update or delete a subject or chapter but don't know its ID.",
+      title: "Get Legacy Historical Data",
+      description: "Retrieves the raw, historical legacy academic data including old progress percentages, legacy revisions, and chapters without a Subject-wise Framework. Only use this when explicitly asked to view or retrieve legacy/historical data.",
       inputSchema: z.object({})
     },
     async () => {
@@ -38,6 +46,84 @@ export const registerSyllabusTools = (server: any) => {
             }, null, 2) 
           }],
         };
+      } catch (e: any) {
+        return { isError: true, content: [{ type: "text", text: `Error: ${e.message}` }] };
+      }
+    }
+  );
+
+  // ---------------------------------------------------------
+  // SYLLABUS TOOLS
+  // ---------------------------------------------------------
+
+  server.registerTool(
+    "get_syllabus_state",
+    {
+      title: "Get Syllabus State",
+      description: "Retrieves the full syllabus hierarchy (Subjects and Chapters) along with their IDs. Always call this tool first if you need to update or delete a subject or chapter but don't know its ID.",
+      inputSchema: z.object({})
+    },
+    async () => {
+      try {
+        const [subSnap, chapSnap, recSnap] = await Promise.all([
+          get(ref(db, "subjects")),
+          get(ref(db, "chapters")),
+          get(ref(db, "recommendation"))
+        ]);
+        
+        
+          const parseNode = (snap: any) => {
+            const data = snap.val();
+            if (!data) return [];
+            return Object.keys(data).map(key => ({ id: key, ...data[key] }));
+          };
+          
+          const rawSubjects = parseNode(subSnap);
+          const rawChapters = parseNode(chapSnap);
+          const rawRec = recSnap.val() || null;
+          
+          // Filter to ONLY framework subjects for active view
+          const activeChapters = rawChapters.map((chap: any) => {
+            const sub = rawSubjects.find((s: any) => s.id === chap.subjectId);
+            const hasFramework = sub && sub.tasks && sub.tasks.length > 0;
+            if (!hasFramework) {
+              return { ...chap, progress: 0, status: 'not_started', nextRevisionDate: undefined, lastRevisionDate: undefined, revisionCount: 0 };
+            }
+            // Framework progress
+            const totalWeight = sub.tasks.reduce((sum: number, t: any) => sum + t.weight, 0);
+            const completedWeight = totalWeight === 0 ? 0 : sub.tasks.reduce((sum: number, t: any) => {
+              if (chap.tasks && chap.tasks[t.id] && chap.tasks[t.id].status === 'completed') return sum + t.weight;
+              return sum;
+            }, 0);
+            const progress = totalWeight === 0 ? 0 : Math.round((completedWeight / totalWeight) * 100);
+            const status = progress === 0 ? 'not_started' : progress === 100 ? 'completed' : 'in_progress';
+            return {
+              ...chap,
+              progress,
+              status,
+              ...(progress === 0 ? { nextRevisionDate: undefined, lastRevisionDate: undefined, revisionCount: 0 } : {})
+            };
+          });
+          
+          let activeRec = rawRec;
+          if (activeRec) {
+            const sub = rawSubjects.find((s: any) => s.id === activeRec.subjectId);
+            if (!sub || !sub.tasks || sub.tasks.length === 0) {
+              activeRec = null;
+            }
+          }
+
+          return {
+            content: [{ 
+              type: "text", 
+              text: JSON.stringify({
+                subjects: rawSubjects,
+                chapters: activeChapters,
+                recommendation: activeRec
+              }, null, 2) 
+            }],
+          };
+
       } catch (error: any) {
         return { content: [{ type: "text", text: `Error: ${error.message}` }], isError: true };
       }
@@ -122,6 +208,17 @@ export const registerSyllabusTools = (server: any) => {
     },
     async (args: any) => {
       try {
+        
+        // For each chapter, check if subject has framework
+        for (const chap of args.chapters) {
+          let sId = chap.subjectId;
+          if (!sId && chap.id) {
+            const cSnap = await get(ref(db, `chapters/${chap.id}`));
+            if (cSnap.exists()) sId = cSnap.val().subjectId;
+          }
+          if (sId) await ensureSubjectFramework(sId);
+        }
+
         const now = new Date().toISOString();
         const results = [];
         
@@ -241,6 +338,13 @@ export const registerSyllabusTools = (server: any) => {
     },
     async (args: any) => {
       try {
+        
+        const cSnap = await get(ref(db, `chapters/${args.id}`));
+        if (cSnap.exists()) {
+          const sId = cSnap.val().subjectId;
+          if (sId) await ensureSubjectFramework(sId);
+        }
+
         await remove(ref(db, `chapters/${args.id}`));
         return { content: [{ type: "text", text: `Chapter ${args.id} deleted` }] };
       } catch (error: any) {
@@ -264,6 +368,9 @@ export const registerSyllabusTools = (server: any) => {
     },
     async (args: any) => {
       try {
+        
+        await ensureSubjectFramework(args.subjectId);
+
         await set(ref(db, `recommendation`), {
           ...args,
           updatedAt: new Date().toISOString()
@@ -288,6 +395,11 @@ export const registerSyllabusTools = (server: any) => {
     },
     async (args: any) => {
       try {
+        
+        const cSnap = await get(ref(db, `chapters/${args.id}`));
+        if (!cSnap.exists()) throw new Error("Chapter not found");
+        await ensureSubjectFramework(cSnap.val().subjectId);
+
         const snap = await get(ref(db, `chapters/${args.id}`));
         if (!snap.exists()) {
            return { content: [{ type: "text", text: `Error: Chapter ${args.id} not found` }], isError: true };
@@ -352,6 +464,11 @@ export const registerSyllabusTools = (server: any) => {
     },
     async (args: any) => {
       try {
+        
+        const cSnap = await get(ref(db, `chapters/${args.id}`));
+        if (!cSnap.exists()) throw new Error("Chapter not found");
+        await ensureSubjectFramework(cSnap.val().subjectId);
+
         const snap = await get(ref(db, `chapters/${args.id}`));
         if (!snap.exists()) {
            return { content: [{ type: "text", text: `Error: Chapter ${args.id} not found` }], isError: true };
@@ -427,6 +544,11 @@ export const registerSyllabusTools = (server: any) => {
     },
     async (args: any) => {
       try {
+        
+        const cSnap = await get(ref(db, `chapters/${args.chapterId}`));
+        if (!cSnap.exists()) throw new Error("Chapter not found");
+        await ensureSubjectFramework(cSnap.val().subjectId);
+
         const snap = await get(ref(db, `chapters/${args.chapterId}`));
         if (!snap.exists()) {
            return { content: [{ type: "text", text: `Error: Chapter ${args.chapterId} not found` }], isError: true };

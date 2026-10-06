@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useSyllabusData } from "@/hooks/useSyllabusData";
+import { getActiveFrameworkChapters, getActiveRecommendation } from "@/utils/framework";
 import { Header } from "@/components/dashboard/Header";
 import { AnalyticsOverview } from "@/components/dashboard/AnalyticsOverview";
 import { AIRecommendation } from "@/components/dashboard/AIRecommendation";
@@ -12,6 +13,9 @@ import { Loader2 } from "lucide-react";
 
 export default function Home() {
   const { subjects, chapters, recommendation, loading, handleCompleteRevision } = useSyllabusData();
+
+  const activeChapters = getActiveFrameworkChapters(chapters, subjects);
+  const activeRec = getActiveRecommendation(recommendation, subjects);
 
   const [activeTab, setActiveTab] = useState<'overview' | 'frameworks'>('overview');
 
@@ -48,22 +52,22 @@ export default function Home() {
 
         {activeTab === 'overview' ? (
           <>
-            <AnalyticsOverview chapters={chapters} />
+            <AnalyticsOverview chapters={activeChapters} />
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <AIRecommendation 
-                recommendation={recommendation} 
+                recommendation={activeRec} 
                 subjects={subjects} 
-                chapters={chapters} 
+                chapters={activeChapters} 
               />
               <UpcomingRevisions 
-                chapters={chapters} 
+                chapters={activeChapters} 
                 subjects={subjects} 
                 onCompleteRevision={handleCompleteRevision} 
               />
             </div>
 
-            <SyllabusBreakdown subjects={subjects} chapters={chapters} />
+            <SyllabusBreakdown subjects={subjects} chapters={activeChapters} />
           </>
         ) : (
           <SubjectFramework subjects={subjects} />
