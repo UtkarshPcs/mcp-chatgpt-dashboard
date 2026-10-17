@@ -680,4 +680,154 @@ export const registerSyllabusTools = (server: any) => {
     }
   );
 
+  // ---------------------------------------------------------
+  // MISTAKE LOG & WEAK TOPIC TOOLS
+  // ---------------------------------------------------------
+
+  server.registerTool(
+    "manage_mistake_log",
+    {
+      title: "Manage Mistake Log",
+      description: "Logs and manages weak topics and mistake entries for specific chapters. Allows adding mistakes (topics, question context, notes), retrieving weak/unresolved topics to target for revision, updating mistake status ('weak' vs 'resolved') or details, and deleting entries.",
+      inputSchema: z.object({
+        action: z.enum(['add', 'update', 'delete', 'get']).describe("The action to perform: 'add', 'update', 'delete', or 'get'"),
+        id: z.string().optional().describe("ID of the mistake log entry (required for 'update' and 'delete')"),
+        chapterId: z.string().optional().describe("ID of the chapter (required for 'add', optional filter for 'get')"),
+        subjectId: z.string().optional().describe("ID of the subject (optional filter for 'get')"),
+        topic: z.string().optional().describe("Specific concept or topic where the mistake occurred (required for 'add')"),
+        question: z.string().optional().describe("Simple text entry of the question or problem context"),
+        notes: z.string().optional().describe("Explanation of why the mistake happened, concept gap, or remedial note"),
+        status: z.enum(['weak', 'resolved', 'all']).optional().describe("Status to set on 'add'/'update' ('weak' or 'resolved', defaults to 'weak'), or filter for 'get' ('weak', 'resolved', or 'all', defaults to 'weak')")
+      })
+    },
+    async (args: any) => {
+      try {
+        const now = new Date().toISOString();
+
+        if (args.action === 'add') {
+          if (!args.chapterId) {
+            return { content: [{ type: "text", text: "Error: 'chapterId' is required to add a mistake log entry." }], isError: true };
+          }
+          if (!args.topic || !args.topic.trim()) {
+            return { content: [{ type: "text", text: "Error: 'topic' is required to identify the weak concept." }], isError: true };
+          }
+
+          const cSnap = await get(ref(db, `chapters/${args.chapterId}`));
+          if (!cSnap.exists()) {
+            return { content: [{ type: "text", text: `Error: Chapter with ID '${args.chapterId}' not found.` }], isError: true };
+          }
+          const chapter = cSnap.val();
+          const subjectId = chapter.subjectId || "";
+
+          const newRef = await push(ref(db, "mistakes"), {
+            chapterId: args.chapterId,
+            subjectId,
+            topic: args.topic.trim(),
+            question: args.question?.trim() || "",
+            notes: args.notes?.trim() || "",
+            status: args.status === 'resolved' ? 'resolved' : 'weak',
+            createdAt: now,
+            updatedAt: now,
+          });
+
+          return {
+            content: [{
+              type: "text",
+              text: `Mistake log entry recorded successfully with ID: ${newRef.key} for chapter '${chapter.title}'. Topic: "${args.topic.trim()}". Status: ${args.status === 'resolved' ? 'resolved' : 'weak'}.`
+            }]
+          };
+        }
+
+        if (args.action === 'update') {
+          if (!args.id) {
+            return { content: [{ type: "text", text: "Error: 'id' is required to update a mistake log entry." }], isError: true };
+          }
+
+          const mSnap = await get(ref(db, `mistakes/${args.id}`));
+          if (!mSnap.exists()) {
+            return { content: [{ type: "text", text: `Error: Mistake log entry with ID '${args.id}' not found.` }], isError: true };
+          }
+
+          const updates: Record<string, any> = { updatedAt: now };
+          if (args.topic !== undefined) updates.topic = args.topic.trim();
+          if (args.question !== undefined) updates.question = args.question.trim();
+          if (args.notes !== undefined) updates.notes = args.notes.trim();
+          if (args.status !== undefined && args.status !== 'all') updates.status = args.status;
+
+          await update(ref(db, `mistakes/${args.id}`), updates);
+          return { content: [{ type: "text", text: `Mistake log entry '${args.id}' updated successfully.` }] };
+        }
+
+        if (args.action === 'delete') {
+          if (!args.id) {
+            return { content: [{ type: "text", text: "Error: 'id' is required to delete a mistake log entry." }], isError: true };
+          }
+
+          const mSnap = await get(ref(db, `mistakes/${args.id}`));
+          if (!mSnap.exists()) {
+            return { content: [{ type: "text", text: `Error: Mistake log entry with ID '${args.id}' not found.` }], isError: true };
+          }
+
+          await remove(ref(db, `mistakes/${args.id}`));
+          return { content: [{ type: "text", text: `Mistake log entry '${args.id}' deleted successfully.` }] };
+        }
+
+        if (args.action === 'get') {
+          const [mSnap, subSnap, chapSnap] = await Promise.all([
+            get(ref(db, "mistakes")),
+            get(ref(db, "subjects")),
+            get(ref(db, "chapters"))
+          ]);
+
+          const rawMistakes = mSnap.val() || {};
+          const subjects = subSnap.val() || {};
+          const chapters = chapSnap.val() || {};
+
+          const statusFilter = args.status || 'weak'; // default to 'weak' so agent gets weak topics
+
+          const list = Object.keys(rawMistakes).map(key => {
+            const m = rawMistakes[key];
+            const chapter = chapters[m.chapterId];
+            const subject = subjects[m.subjectId || (chapter ? chapter.subjectId : "")];
+
+            return {
+              id: key,
+              ...m,
+              chapterTitle: chapter ? chapter.title : "Unknown Chapter",
+              subjectName: subject ? subject.name : "Unknown Subject"
+            };
+          }).filter(m => {
+            if (args.chapterId && m.chapterId !== args.chapterId) return false;
+            if (args.subjectId && m.subjectId !== args.subjectId) return false;
+            if (statusFilter !== 'all' && m.status !== statusFilter) return false;
+            return true;
+          });
+
+          const weakCount = list.filter(m => m.status === 'weak').length;
+
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                total: list.length,
+                weakCount,
+                filterApplied: {
+                  chapterId: args.chapterId || null,
+                  subjectId: args.subjectId || null,
+                  status: statusFilter
+                },
+                mistakes: list
+              }, null, 2)
+            }]
+          };
+        }
+
+        return { content: [{ type: "text", text: `Error: Unsupported action '${args.action}'. Supported actions are 'add', 'update', 'delete', 'get'.` }], isError: true };
+      } catch (error: any) {
+        return { content: [{ type: "text", text: `Error: ${error.message}` }], isError: true };
+      }
+    }
+  );
+
 };
+

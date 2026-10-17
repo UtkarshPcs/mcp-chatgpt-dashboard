@@ -82,3 +82,18 @@ export interface Exam {
   createdAt: string;
   updatedAt: string;
 }
+
+export type MistakeStatus = 'weak' | 'resolved';
+
+export interface MistakeLog {
+  id: string;
+  chapterId: string;
+  subjectId: string;
+  topic: string;
+  question?: string;
+  notes?: string;
+  status: MistakeStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
