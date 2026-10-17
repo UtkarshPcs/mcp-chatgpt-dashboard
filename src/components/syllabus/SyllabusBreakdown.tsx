@@ -1,8 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { Chapter, Subject } from "@/types";
-import { BookOpen, ChevronDown, ChevronRight, CheckCircle2 } from "lucide-react";
+import { Chapter, Subject, MistakeLog, MistakeStatus } from "@/types";
+import { BookOpen, ChevronDown, ChevronRight, CheckCircle2, AlertTriangle } from "lucide-react";
 import { SECTIONS } from "@/utils/constants";
 import { calculateCompletion } from "@/utils/calculations";
 import { getSubjectColor, getSubjectText } from "@/utils/theme";
@@ -10,16 +10,28 @@ import { getSubjectColor, getSubjectText } from "@/utils/theme";
 interface SyllabusBreakdownProps {
   subjects: Subject[];
   chapters: Chapter[];
+  mistakes?: MistakeLog[];
+  onToggleMistakeStatus?: (id: string, current: MistakeStatus) => Promise<void>;
 }
 
-export function SyllabusBreakdown({ subjects, chapters }: SyllabusBreakdownProps) {
+export function SyllabusBreakdown({ 
+  subjects, 
+  chapters,
+  mistakes = [],
+  onToggleMistakeStatus
+}: SyllabusBreakdownProps) {
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
     'Science': true,
     'Mathematics': true
   });
+  const [expandedMistakes, setExpandedMistakes] = useState<Record<string, boolean>>({});
 
   const toggleSection = (section: string) => {
     setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));
+  };
+
+  const toggleChapterMistakes = (chapterId: string) => {
+    setExpandedMistakes(prev => ({ ...prev, [chapterId]: !prev[chapterId] }));
   };
 
   return (
@@ -90,67 +102,125 @@ export function SyllabusBreakdown({ subjects, chapters }: SyllabusBreakdownProps
                                   }, 0);
                                 }
 
-                                return (
-                                  <div key={chapter.id} className="flex flex-col gap-1.5 p-3 rounded-lg bg-zinc-950/50 border border-zinc-800/50 hover:border-zinc-700 transition-colors">
-                                    <div className="flex justify-between items-start gap-3">
-                                      <span className="text-sm font-medium text-zinc-300 leading-tight">
-                                        {chapter.title}
-                                      </span>
-                                      <div className="flex items-center gap-2 flex-shrink-0">
-                                        <span className="text-[10px] uppercase font-bold text-indigo-400 bg-indigo-400/10 px-1.5 py-0.5 rounded border border-indigo-400/20">
-                                          {Math.min(chapter.revisionCount || 0, 3)}/3 Rev
-                                        </span>
-                                        {chapter.status === 'revision' && <span className="text-[10px] uppercase font-bold text-purple-400 bg-purple-400/10 px-1.5 py-0.5 rounded border border-purple-400/20">Revise</span>}
-                                        {chapter.status === 'completed' && !hasTasks && <CheckCircle2 className="w-4 h-4 text-emerald-500" />}
-                                        {hasTasks ? (
-                                          <span className="text-xs text-zinc-400 font-bold">{Math.round(taskCompletion)}%</span>
-                                        ) : (
-                                          chapter.status !== 'completed' && <span className="text-xs text-zinc-500 font-medium">{chapter.progress}%</span>
-                                        )}
-                                      </div>
-                                    </div>
-                                    
-                                    {/* Task Checklist Bubbles */}
-                                    {hasTasks && (
-                                      <div className="flex flex-wrap gap-1 mt-1">
-                                        {subject.tasks!.sort((a,b) => a.order - b.order).map(t => {
-                                          const isCompleted = chapter.tasks?.[t.id]?.status === 'completed';
-                                          return (
-                                            <span 
-                                              key={t.id} 
-                                              className={`text-[9px] uppercase font-bold px-1.5 py-0.5 rounded border ${
-                                                isCompleted 
-                                                  ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' 
-                                                  : 'bg-zinc-900 text-zinc-600 border-zinc-800'
-                                              }`}
-                                              title={t.name}
-                                            >
-                                              {t.name}
-                                            </span>
-                                          );
-                                        })}
-                                      </div>
-                                    )}
+                                  const chapterMistakes = mistakes.filter(m => m.chapterId === chapter.id);
+                                  const chapterWeakCount = chapterMistakes.filter(m => m.status === 'weak').length;
+                                  const isMistakesExpanded = expandedMistakes[chapter.id] || false;
 
-                                    {/* Legacy Progress Bar (Only show if not completed and no tasks) */}
-                                    {chapter.status !== 'completed' && !hasTasks && (
-                                      <div className="w-full bg-zinc-900 rounded-full h-1 mt-1">
-                                        <div 
-                                          className={`h-1 rounded-full bg-gradient-to-r ${getSubjectColor(subject.color)}`} 
-                                          style={{ width: `${chapter.progress}%` }}
-                                        ></div>
+                                  return (
+                                    <div key={chapter.id} className="flex flex-col gap-1.5 p-3 rounded-lg bg-zinc-950/50 border border-zinc-800/50 hover:border-zinc-700 transition-colors">
+                                      <div className="flex justify-between items-start gap-3">
+                                        <span className="text-sm font-medium text-zinc-300 leading-tight">
+                                          {chapter.title}
+                                        </span>
+                                        <div className="flex items-center gap-2 flex-shrink-0">
+                                          {chapterMistakes.length > 0 && (
+                                            <button
+                                              type="button"
+                                              onClick={() => toggleChapterMistakes(chapter.id)}
+                                              className={`text-[10px] uppercase font-bold px-1.5 py-0.5 rounded border flex items-center gap-1 transition-colors ${
+                                                chapterWeakCount > 0
+                                                  ? 'bg-rose-500/10 text-rose-400 border-rose-500/30 hover:bg-rose-500/20'
+                                                  : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20'
+                                              }`}
+                                              title="Click to view chapter mistakes"
+                                            >
+                                              <AlertTriangle className="w-2.5 h-2.5" />
+                                              {chapterWeakCount > 0 ? `${chapterWeakCount} Weak` : `${chapterMistakes.length} Resolved`}
+                                            </button>
+                                          )}
+                                          <span className="text-[10px] uppercase font-bold text-indigo-400 bg-indigo-400/10 px-1.5 py-0.5 rounded border border-indigo-400/20">
+                                            {Math.min(chapter.revisionCount || 0, 3)}/3 Rev
+                                          </span>
+                                          {chapter.status === 'revision' && <span className="text-[10px] uppercase font-bold text-purple-400 bg-purple-400/10 px-1.5 py-0.5 rounded border border-purple-400/20">Revise</span>}
+                                          {chapter.status === 'completed' && !hasTasks && <CheckCircle2 className="w-4 h-4 text-emerald-500" />}
+                                          {hasTasks ? (
+                                            <span className="text-xs text-zinc-400 font-bold">{Math.round(taskCompletion)}%</span>
+                                          ) : (
+                                            chapter.status !== 'completed' && <span className="text-xs text-zinc-500 font-medium">{chapter.progress}%</span>
+                                          )}
+                                        </div>
                                       </div>
-                                    )}
-                                    
-                                    {/* New Task Progress Bar */}
-                                    {hasTasks && (
-                                      <div className="w-full bg-zinc-900 rounded-full h-1 mt-1">
-                                        <div 
-                                          className={`h-1 rounded-full bg-emerald-500 transition-all`} 
-                                          style={{ width: `${taskCompletion}%` }}
-                                        ></div>
-                                      </div>
-                                    )}
+                                      
+                                      {/* Task Checklist Bubbles */}
+                                      {hasTasks && (
+                                        <div className="flex flex-wrap gap-1 mt-1">
+                                          {subject.tasks!.sort((a,b) => a.order - b.order).map(t => {
+                                            const isCompleted = chapter.tasks?.[t.id]?.status === 'completed';
+                                            return (
+                                              <span 
+                                                key={t.id} 
+                                                className={`text-[9px] uppercase font-bold px-1.5 py-0.5 rounded border ${
+                                                  isCompleted 
+                                                    ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' 
+                                                    : 'bg-zinc-900 text-zinc-600 border-zinc-800'
+                                                }`}
+                                                title={t.name}
+                                              >
+                                                {t.name}
+                                              </span>
+                                            );
+                                          })}
+                                        </div>
+                                      )}
+
+                                      {/* Legacy Progress Bar (Only show if not completed and no tasks) */}
+                                      {chapter.status !== 'completed' && !hasTasks && (
+                                        <div className="w-full bg-zinc-900 rounded-full h-1 mt-1">
+                                          <div 
+                                            className={`h-1 rounded-full bg-gradient-to-r ${getSubjectColor(subject.color)}`} 
+                                            style={{ width: `${chapter.progress}%` }}
+                                          ></div>
+                                        </div>
+                                      )}
+                                      
+                                      {/* New Task Progress Bar */}
+                                      {hasTasks && (
+                                        <div className="w-full bg-zinc-900 rounded-full h-1 mt-1">
+                                          <div 
+                                            className={`h-1 rounded-full bg-emerald-500 transition-all`} 
+                                            style={{ width: `${taskCompletion}%` }}
+                                          ></div>
+                                        </div>
+                                      )}
+
+                                      {/* Chapter Mistakes Drawer */}
+                                      {isMistakesExpanded && chapterMistakes.length > 0 && (
+                                        <div className="mt-2.5 pt-2 border-t border-zinc-800/80 space-y-2">
+                                          <div className="flex items-center justify-between text-[11px] text-zinc-400">
+                                            <span className="font-semibold text-rose-400 flex items-center gap-1">
+                                              <AlertTriangle className="w-3 h-3" /> Logged Mistakes ({chapterMistakes.length})
+                                            </span>
+                                          </div>
+                                          <div className="space-y-1.5">
+                                            {chapterMistakes.map(m => (
+                                              <div 
+                                                key={m.id}
+                                                className={`p-2 rounded-lg border text-xs flex items-start justify-between gap-2 ${
+                                                  m.status === 'weak' ? 'bg-rose-950/20 border-rose-500/20' : 'bg-zinc-900/60 border-zinc-800'
+                                                }`}
+                                              >
+                                                <div className="space-y-0.5 min-w-0 flex-1">
+                                                  <div className="font-semibold text-zinc-200">{m.topic}</div>
+                                                  {m.question && <div className="text-[11px] text-zinc-400 font-mono italic truncate">Q: {m.question}</div>}
+                                                  {m.notes && <div className="text-[11px] text-zinc-500">Note: {m.notes}</div>}
+                                                </div>
+                                                {onToggleMistakeStatus && (
+                                                  <button
+                                                    onClick={() => onToggleMistakeStatus(m.id, m.status)}
+                                                    className={`flex-shrink-0 text-[10px] font-bold px-2 py-0.5 rounded border transition-colors ${
+                                                      m.status === 'weak'
+                                                        ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20'
+                                                        : 'bg-zinc-800 text-zinc-400 border-zinc-700 hover:text-rose-400'
+                                                    }`}
+                                                  >
+                                                    {m.status === 'weak' ? 'Resolve' : 'Re-open'}
+                                                  </button>
+                                                )}
+                                              </div>
+                                            ))}
+                                          </div>
+                                        </div>
+                                      )}
                                   </div>
                                 );
                               })
