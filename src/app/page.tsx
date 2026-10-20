@@ -3,16 +3,18 @@
 import { useState } from "react";
 import { useSyllabusData } from "@/hooks/useSyllabusData";
 import { getActiveFrameworkChapters, getActiveRecommendation } from "@/utils/framework";
+import { formatDuration, calculateTotalStudyTime } from "@/utils/timeCalculations";
 import { Header } from "@/components/dashboard/Header";
 import { AnalyticsOverview } from "@/components/dashboard/AnalyticsOverview";
 import { AIRecommendation } from "@/components/dashboard/AIRecommendation";
 import { UpcomingRevisions } from "@/components/dashboard/UpcomingRevisions";
 import { MistakesCard } from "@/components/dashboard/MistakesCard";
 import { MistakeLogView } from "@/components/dashboard/MistakeLogView";
+import { TimeAnalyticsView } from "@/components/dashboard/TimeAnalyticsView";
 import { SyllabusBreakdown } from "@/components/syllabus/SyllabusBreakdown";
 import { SubjectFramework } from "@/components/syllabus/SubjectFramework";
 import { ExamStatus } from "@/components/dashboard/ExamStatus";
-import { Loader2 } from "lucide-react";
+import { Loader2, Clock } from "lucide-react";
 
 export default function Home() {
   const { 
@@ -21,17 +23,21 @@ export default function Home() {
     recommendation, 
     exams, 
     mistakes,
+    timeLogs,
     loading, 
     handleCompleteRevision,
     handleToggleMistakeStatus,
-    handleDeleteMistake
+    handleDeleteMistake,
+    handleLogTime,
+    handleDeleteTimeLog
   } = useSyllabusData();
 
   const activeChapters = getActiveFrameworkChapters(chapters, subjects);
   const activeRec = getActiveRecommendation(recommendation, subjects);
 
-  const [activeTab, setActiveTab] = useState<'overview' | 'frameworks' | 'exams' | 'mistakes'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'exams' | 'mistakes' | 'time' | 'frameworks'>('overview');
   const weakCount = mistakes.filter(m => m.status === 'weak').length;
+  const totalStudyMinutes = calculateTotalStudyTime(timeLogs);
 
   if (loading) {
     return (
@@ -55,6 +61,18 @@ export default function Home() {
             className={`px-6 py-3 font-medium text-sm transition-colors border-b-2 ${activeTab === 'overview' ? 'border-blue-500 text-blue-400' : 'border-transparent text-zinc-400 hover:text-zinc-200 hover:border-zinc-700'}`}
           >
             Dashboard Overview
+          </button>
+          <button 
+            onClick={() => setActiveTab('time')}
+            className={`px-6 py-3 font-medium text-sm transition-colors border-b-2 flex items-center gap-2 ${activeTab === 'time' ? 'border-cyan-500 text-cyan-400' : 'border-transparent text-zinc-400 hover:text-zinc-200 hover:border-zinc-700'}`}
+          >
+            <Clock className="w-4 h-4" />
+            <span>Study Time</span>
+            {totalStudyMinutes > 0 && (
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                {formatDuration(totalStudyMinutes)}
+              </span>
+            )}
           </button>
           <button 
             onClick={() => setActiveTab('exams')}
@@ -83,7 +101,7 @@ export default function Home() {
 
         {activeTab === 'overview' && (
           <>
-            <AnalyticsOverview chapters={activeChapters} />
+            <AnalyticsOverview chapters={activeChapters} timeLogs={timeLogs} />
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <AIRecommendation 
@@ -110,9 +128,19 @@ export default function Home() {
               subjects={subjects} 
               chapters={activeChapters}
               mistakes={mistakes}
+              timeLogs={timeLogs}
               onToggleMistakeStatus={handleToggleMistakeStatus}
             />
           </>
+        )}
+        {activeTab === 'time' && (
+          <TimeAnalyticsView 
+            subjects={subjects}
+            chapters={activeChapters}
+            timeLogs={timeLogs}
+            onLogTime={handleLogTime}
+            onDeleteTimeLog={handleDeleteTimeLog}
+          />
         )}
         {activeTab === 'mistakes' && (
           <MistakeLogView 

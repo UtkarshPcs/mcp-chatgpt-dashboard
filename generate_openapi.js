@@ -202,7 +202,51 @@ const mcpOutput = {
         },
         "required": ["action"]
       }
+    },
+    {
+      "name": "log_task_time",
+      "description": "Logs the time spent on a specific task within a chapter. Records subject, chapter, task, duration in minutes, timestamp, and optional notes. Preserves historical records across repeated sessions without overwriting previous entries. Optionally marks the chapter task as completed.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "chapterId": { "type": "string", "description": "The unique ID of the chapter being studied" },
+          "taskId": { "type": "string", "description": "The ID of the task (from framework or 'revision' or custom)" },
+          "timeSpentMinutes": { "type": "number", "description": "Duration spent studying in minutes" },
+          "subjectId": { "type": "string", "description": "The unique ID of the subject (optional)" },
+          "taskName": { "type": "string", "description": "Human-readable display name for this task (optional)" },
+          "timestamp": { "type": "string", "description": "ISO date string for when the session took place (optional)" },
+          "notes": { "type": "string", "description": "Optional notes on what was accomplished" },
+          "markTaskCompleted": { "type": "boolean", "description": "If true, also marks chapter task as completed" }
+        },
+        "required": ["chapterId", "taskId", "timeSpentMinutes"]
+      }
+    },
+    {
+      "name": "get_study_time_analytics",
+      "description": "Calculates study time statistics from logged data. Returns total time spent, average time per session, empirical average time required to complete or revise each task type across multiple sessions, time-consuming chapter rankings, and recent session logs.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "subjectId": { "type": "string", "description": "Optional filter by subject ID" },
+          "chapterId": { "type": "string", "description": "Optional filter by chapter ID" },
+          "taskId": { "type": "string", "description": "Optional filter by task ID or task type" }
+        }
+      }
+    },
+    {
+      "name": "manage_time_logs",
+      "description": "Lists or deletes individual study time records.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": { "type": "string", "enum": ["list", "delete"], "description": "The action to perform: 'list' or 'delete'" },
+          "id": { "type": "string", "description": "ID of the time log entry to delete (required for 'delete')" },
+          "limit": { "type": "number", "description": "Maximum number of entries to return on 'list'" }
+        },
+        "required": ["action"]
+      }
     }
+
   ]
 };
 

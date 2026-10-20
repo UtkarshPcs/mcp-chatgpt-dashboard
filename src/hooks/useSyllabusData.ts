@@ -1,9 +1,9 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { ref, onValue, update, remove } from "firebase/database";
+import { ref, onValue, update, remove, push } from "firebase/database";
 import { db } from "@/lib/firebase";
-import { Subject, Chapter, AIRecommendation, Exam, MistakeLog, MistakeStatus } from "@/types";
+import { Subject, Chapter, AIRecommendation, Exam, MistakeLog, MistakeStatus, TimeLog } from "@/types";
 
 export function useSyllabusData() {
   const [subjects, setSubjects] = useState<Subject[]>([]);
@@ -11,6 +11,7 @@ export function useSyllabusData() {
   const [recommendation, setRecommendation] = useState<AIRecommendation | null>(null);
   const [exams, setExams] = useState<Exam[]>([]);
   const [mistakes, setMistakes] = useState<MistakeLog[]>([]);
+  const [timeLogs, setTimeLogs] = useState<TimeLog[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -19,9 +20,10 @@ export function useSyllabusData() {
     const recRef = ref(db, "recommendation");
     const examsRef = ref(db, "exams");
     const mistakesRef = ref(db, "mistakes");
+    const timeLogsRef = ref(db, "timeLogs");
     
     let loaded = 0;
-    const checkLoaded = () => { loaded++; if (loaded === 5) setLoading(false); };
+    const checkLoaded = () => { loaded++; if (loaded === 6) setLoading(false); };
 
     const unsubSubs = onValue(subsRef, (snap) => {
       const data = snap.val();
@@ -52,7 +54,20 @@ export function useSyllabusData() {
       checkLoaded();
     });
 
-    return () => { unsubSubs(); unsubChaps(); unsubRec(); unsubExams(); unsubMistakes(); };
+    const unsubTimeLogs = onValue(timeLogsRef, (snap) => {
+      const data = snap.val();
+      setTimeLogs(data ? Object.keys(data).map(k => ({ id: k, ...data[k] })) : []);
+      checkLoaded();
+    });
+
+    return () => { 
+      unsubSubs(); 
+      unsubChaps(); 
+      unsubRec(); 
+      unsubExams(); 
+      unsubMistakes(); 
+      unsubTimeLogs(); 
+    };
 
   }, []);
 
@@ -93,15 +108,66 @@ export function useSyllabusData() {
     }
   };
 
+  const handleLogTime = async (entry: {
+    chapterId: string;
+    subjectId: string;
+    taskId: string;
+    taskName: string;
+    timeSpentMinutes: number;
+    notes?: string;
+    timestamp?: string;
+    markTaskCompleted?: boolean;
+  }) => {
+    const now = new Date().toISOString();
+    const sessionTime = entry.timestamp || now;
+    try {
+      if (entry.markTaskCompleted) {
+        const updatePath = `chapters/${entry.chapterId}/tasks/${entry.taskId}`;
+        await update(ref(db), {
+          [`${updatePath}/status`]: 'completed',
+          [`${updatePath}/completedAt`]: sessionTime,
+          [`chapters/${entry.chapterId}/updatedAt`]: now
+        });
+      }
+
+      await push(ref(db, "timeLogs"), {
+        chapterId: entry.chapterId,
+        subjectId: entry.subjectId,
+        taskId: entry.taskId,
+        taskName: entry.taskName,
+        timeSpentMinutes: entry.timeSpentMinutes,
+        timestamp: sessionTime,
+        notes: entry.notes?.trim() || "",
+        createdAt: now,
+        updatedAt: now
+      });
+    } catch (e) {
+      console.error("Error logging study time", e);
+      throw e;
+    }
+  };
+
+  const handleDeleteTimeLog = async (id: string) => {
+    try {
+      await remove(ref(db, `timeLogs/${id}`));
+    } catch (e) {
+      console.error("Error deleting time log", e);
+      throw e;
+    }
+  };
+
   return {
     subjects,
     chapters,
     recommendation,
     exams,
     mistakes,
+    timeLogs,
     loading,
     handleCompleteRevision,
     handleToggleMistakeStatus,
-    handleDeleteMistake
+    handleDeleteMistake,
+    handleLogTime,
+    handleDeleteTimeLog
   };
 }

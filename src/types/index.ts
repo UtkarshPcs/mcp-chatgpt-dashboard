@@ -97,3 +97,38 @@ export interface MistakeLog {
   updatedAt: string;
 }
 
+export interface TimeLog {
+  id: string;
+  chapterId: string;
+  subjectId: string;
+  taskId: string;            // Framework task ID or 'revision' or custom task type
+  taskName: string;          // Human-readable task name
+  timeSpentMinutes: number;  // Time spent in minutes
+  timestamp: string;         // ISO date string
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TaskBenchmark {
+  taskId: string;
+  taskName: string;
+  totalMinutes: number;
+  sessionCount: number;
+  averageMinutes: number;
+  minMinutes: number;
+  maxMinutes: number;
+  subjectName?: string;
+}
+
+export interface ChapterTimeStat {
+  chapterId: string;
+  chapterTitle: string;
+  subjectId: string;
+  subjectName: string;
+  totalMinutes: number;
+  sessionCount: number;
+  taskBreakdown: Record<string, { taskName: string; minutes: number; sessionCount: number }>;
+}
+
+

@@ -1,16 +1,18 @@
 "use client";
 
 import { useState } from "react";
-import { Chapter, Subject, MistakeLog, MistakeStatus } from "@/types";
-import { BookOpen, ChevronDown, ChevronRight, CheckCircle2, AlertTriangle } from "lucide-react";
+import { Chapter, Subject, MistakeLog, MistakeStatus, TimeLog } from "@/types";
+import { BookOpen, ChevronDown, ChevronRight, CheckCircle2, AlertTriangle, Clock } from "lucide-react";
 import { SECTIONS } from "@/utils/constants";
 import { calculateCompletion } from "@/utils/calculations";
+import { calculateChapterTime, calculateTaskTime, formatDuration } from "@/utils/timeCalculations";
 import { getSubjectColor, getSubjectText } from "@/utils/theme";
 
 interface SyllabusBreakdownProps {
   subjects: Subject[];
   chapters: Chapter[];
   mistakes?: MistakeLog[];
+  timeLogs?: TimeLog[];
   onToggleMistakeStatus?: (id: string, current: MistakeStatus) => Promise<void>;
 }
 
@@ -18,6 +20,7 @@ export function SyllabusBreakdown({
   subjects, 
   chapters,
   mistakes = [],
+  timeLogs = [],
   onToggleMistakeStatus
 }: SyllabusBreakdownProps) {
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
@@ -25,6 +28,7 @@ export function SyllabusBreakdown({
     'Mathematics': true
   });
   const [expandedMistakes, setExpandedMistakes] = useState<Record<string, boolean>>({});
+  const [expandedSessions, setExpandedSessions] = useState<Record<string, boolean>>({});
 
   const toggleSection = (section: string) => {
     setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));
@@ -32,6 +36,10 @@ export function SyllabusBreakdown({
 
   const toggleChapterMistakes = (chapterId: string) => {
     setExpandedMistakes(prev => ({ ...prev, [chapterId]: !prev[chapterId] }));
+  };
+
+  const toggleChapterSessions = (chapterId: string) => {
+    setExpandedSessions(prev => ({ ...prev, [chapterId]: !prev[chapterId] }));
   };
 
   return (
@@ -106,6 +114,12 @@ export function SyllabusBreakdown({
                                   const chapterWeakCount = chapterMistakes.filter(m => m.status === 'weak').length;
                                   const isMistakesExpanded = expandedMistakes[chapter.id] || false;
 
+                                  const chapterTotalMinutes = calculateChapterTime(chapter.id, timeLogs);
+                                  const chapterSessions = timeLogs
+                                    .filter(l => l.chapterId === chapter.id)
+                                    .sort((a, b) => new Date(b.timestamp || b.createdAt).getTime() - new Date(a.timestamp || a.createdAt).getTime());
+                                  const isSessionsExpanded = expandedSessions[chapter.id] || false;
+
                                   return (
                                     <div key={chapter.id} className="flex flex-col gap-1.5 p-3 rounded-lg bg-zinc-950/50 border border-zinc-800/50 hover:border-zinc-700 transition-colors">
                                       <div className="flex justify-between items-start gap-3">
@@ -113,6 +127,17 @@ export function SyllabusBreakdown({
                                           {chapter.title}
                                         </span>
                                         <div className="flex items-center gap-2 flex-shrink-0">
+                                          {chapterTotalMinutes > 0 && (
+                                            <button
+                                              type="button"
+                                              onClick={() => toggleChapterSessions(chapter.id)}
+                                              className="text-[10px] font-bold px-1.5 py-0.5 rounded border flex items-center gap-1 transition-colors bg-cyan-500/10 text-cyan-300 border-cyan-500/30 hover:bg-cyan-500/20"
+                                              title="Click to view chapter study sessions"
+                                            >
+                                              <Clock className="w-2.5 h-2.5" />
+                                              {formatDuration(chapterTotalMinutes)}
+                                            </button>
+                                          )}
                                           {chapterMistakes.length > 0 && (
                                             <button
                                               type="button"
@@ -146,17 +171,25 @@ export function SyllabusBreakdown({
                                         <div className="flex flex-wrap gap-1 mt-1">
                                           {subject.tasks!.sort((a,b) => a.order - b.order).map(t => {
                                             const isCompleted = chapter.tasks?.[t.id]?.status === 'completed';
+                                            const taskMinutes = calculateTaskTime(chapter.id, t.id, timeLogs);
                                             return (
                                               <span 
                                                 key={t.id} 
-                                                className={`text-[9px] uppercase font-bold px-1.5 py-0.5 rounded border ${
+                                                className={`text-[9px] uppercase font-bold px-1.5 py-0.5 rounded border inline-flex items-center gap-1 ${
                                                   isCompleted 
                                                     ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' 
+                                                    : taskMinutes > 0
+                                                    ? 'bg-cyan-500/10 text-cyan-300 border-cyan-500/30'
                                                     : 'bg-zinc-900 text-zinc-600 border-zinc-800'
                                                 }`}
-                                                title={t.name}
+                                                title={`${t.name}${taskMinutes > 0 ? ` (${formatDuration(taskMinutes)})` : ''}`}
                                               >
-                                                {t.name}
+                                                <span>{t.name}</span>
+                                                {taskMinutes > 0 && (
+                                                  <span className="text-[8px] font-mono px-1 py-0.2 rounded bg-cyan-950/80 text-cyan-300 border border-cyan-500/30">
+                                                    {formatDuration(taskMinutes)}
+                                                  </span>
+                                                )}
                                               </span>
                                             );
                                           })}
@@ -180,6 +213,38 @@ export function SyllabusBreakdown({
                                             className={`h-1 rounded-full bg-emerald-500 transition-all`} 
                                             style={{ width: `${taskCompletion}%` }}
                                           ></div>
+                                        </div>
+                                      )}
+
+                                      {/* Chapter Study Sessions Drawer */}
+                                      {isSessionsExpanded && chapterSessions.length > 0 && (
+                                        <div className="mt-2.5 pt-2 border-t border-zinc-800/80 space-y-2">
+                                          <div className="flex items-center justify-between text-[11px] text-zinc-400">
+                                            <span className="font-semibold text-cyan-400 flex items-center gap-1">
+                                              <Clock className="w-3 h-3" /> Logged Study Sessions ({chapterSessions.length}) · {formatDuration(chapterTotalMinutes)} total
+                                            </span>
+                                          </div>
+                                          <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+                                            {chapterSessions.map(s => (
+                                              <div 
+                                                key={s.id}
+                                                className="p-2 rounded-lg border text-xs bg-zinc-900/60 border-zinc-800 flex items-start justify-between gap-2"
+                                              >
+                                                <div className="space-y-0.5 min-w-0 flex-1">
+                                                  <div className="flex items-center gap-2">
+                                                    <span className="font-semibold text-zinc-200">{s.taskName || s.taskId}</span>
+                                                    <span className="text-[10px] font-mono text-cyan-300 bg-cyan-950/60 px-1.5 py-0.2 rounded border border-cyan-500/20">
+                                                      {formatDuration(s.timeSpentMinutes)}
+                                                    </span>
+                                                  </div>
+                                                  {s.notes && <div className="text-[11px] text-zinc-400">{s.notes}</div>}
+                                                  <div className="text-[10px] text-zinc-500 font-mono">
+                                                    {new Date(s.timestamp || s.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                                                  </div>
+                                                </div>
+                                              </div>
+                                            ))}
+                                          </div>
                                         </div>
                                       )}
 

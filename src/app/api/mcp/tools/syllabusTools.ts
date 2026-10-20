@@ -829,5 +829,365 @@ export const registerSyllabusTools = (server: any) => {
     }
   );
 
+  // ---------------------------------------------------------
+  // STUDY TIME TRACKING TOOLS
+  // ---------------------------------------------------------
+
+  server.registerTool(
+    "log_task_time",
+    {
+      title: "Log Study Task Time",
+      description: "Logs the time spent on a specific task within a chapter. Records subject, chapter, task, duration in minutes, timestamp, and optional notes. Preserves historical records across repeated sessions without overwriting previous entries. Optionally marks the chapter task as completed.",
+      inputSchema: z.object({
+        chapterId: z.string().describe("The unique ID of the chapter being studied (call get_syllabus_state if not known)"),
+        taskId: z.string().describe("The ID of the task (e.g. from the subject framework like 'm_concept', 't_lec', or 'revision' for chapter revision, or custom task ID)"),
+        timeSpentMinutes: z.number().positive().describe("Duration spent studying in minutes (e.g. 40)"),
+        subjectId: z.string().optional().describe("The unique ID of the subject (optional; automatically resolved from chapterId if omitted)"),
+        taskName: z.string().optional().describe("Human-readable display name for this task (e.g. 'Standard Question Practice', 'NCERT Reading'). If omitted, will resolve from subject framework if available"),
+        timestamp: z.string().optional().describe("ISO date string for when the session took place (defaults to current time)"),
+        notes: z.string().optional().describe("Optional notes on what was accomplished during this study session"),
+        markTaskCompleted: z.boolean().optional().describe("If true and the task exists in the subject framework, also marks the chapter task as completed")
+      })
+    },
+    async (args: any) => {
+      try {
+        const now = new Date().toISOString();
+        const sessionTime = args.timestamp || now;
+        const minutes = Math.round(args.timeSpentMinutes);
+
+        if (minutes <= 0) {
+          return { content: [{ type: "text", text: "Error: 'timeSpentMinutes' must be greater than 0." }], isError: true };
+        }
+
+        // 1. Verify chapter exists
+        const cSnap = await get(ref(db, `chapters/${args.chapterId}`));
+        if (!cSnap.exists()) {
+          return { content: [{ type: "text", text: `Error: Chapter with ID '${args.chapterId}' not found.` }], isError: true };
+        }
+        const chapter = cSnap.val();
+        const subjectId = args.subjectId || chapter.subjectId || "";
+
+        // 2. Fetch subject to resolve task name and check framework
+        let subjectName = "Unknown Subject";
+        let resolvedTaskName = args.taskName?.trim();
+
+        if (subjectId) {
+          const sSnap = await get(ref(db, `subjects/${subjectId}`));
+          if (sSnap.exists()) {
+            const subject = sSnap.val();
+            subjectName = subject.name || subjectName;
+
+            // Try to find task name in subject framework
+            if (!resolvedTaskName && subject.tasks && Array.isArray(subject.tasks)) {
+              const matchedTask = subject.tasks.find((t: any) => t.id === args.taskId);
+              if (matchedTask) {
+                resolvedTaskName = matchedTask.name;
+              }
+            }
+          }
+        }
+
+        if (!resolvedTaskName) {
+          if (args.taskId === 'revision') {
+            resolvedTaskName = 'Chapter Revision';
+          } else {
+            resolvedTaskName = args.taskId;
+          }
+        }
+
+        // 3. If markTaskCompleted is true, mark chapter task as completed
+        let taskCompletedMsg = "";
+        if (args.markTaskCompleted) {
+          const updatePath = `chapters/${args.chapterId}/tasks/${args.taskId}`;
+          await update(ref(db), {
+            [`${updatePath}/status`]: 'completed',
+            [`${updatePath}/completedAt`]: sessionTime,
+            [`chapters/${args.chapterId}/updatedAt`]: now
+          });
+          taskCompletedMsg = ` and marked task '${resolvedTaskName}' as completed`;
+        }
+
+        // 4. Push new immutable time log record
+        const newRef = await push(ref(db, "timeLogs"), {
+          chapterId: args.chapterId,
+          subjectId,
+          taskId: args.taskId,
+          taskName: resolvedTaskName,
+          timeSpentMinutes: minutes,
+          timestamp: sessionTime,
+          notes: args.notes?.trim() || "",
+          createdAt: now,
+          updatedAt: now
+        });
+
+        // 5. Query chapter totals to give immediate useful feedback
+        const timeLogsSnap = await get(ref(db, "timeLogs"));
+        const allLogs = timeLogsSnap.val() || {};
+        const chapterLogs = Object.values(allLogs).filter((l: any) => l.chapterId === args.chapterId);
+        const taskLogs = chapterLogs.filter((l: any) => l.taskId === args.taskId);
+
+        const chapterTotalMinutes = chapterLogs.reduce((sum: number, l: any) => sum + (l.timeSpentMinutes || 0), 0);
+        const taskTotalMinutes = taskLogs.reduce((sum: number, l: any) => sum + (l.timeSpentMinutes || 0), 0);
+
+        return {
+          content: [{
+            type: "text",
+            text: `Successfully logged ${minutes} minutes for '${resolvedTaskName}' on chapter '${chapter.title}' (${subjectName})${taskCompletedMsg}.\nLog ID: ${newRef.key}\nTotal on this task: ${taskTotalMinutes}m across ${taskLogs.length} session(s).\nTotal on chapter: ${chapterTotalMinutes}m across ${chapterLogs.length} session(s).`
+          }]
+        };
+      } catch (error: any) {
+        return { content: [{ type: "text", text: `Error: ${error.message}` }], isError: true };
+      }
+    }
+  );
+
+  server.registerTool(
+    "get_study_time_analytics",
+    {
+      title: "Get Study Time Analytics",
+      description: "Calculates study time statistics from logged data. Returns total time spent, average time per session, empirical average time required to complete or revise each task type across multiple sessions, time-consuming chapter rankings, and recent session logs. Use this to construct realistic study schedules based on actual student performance.",
+      inputSchema: z.object({
+        subjectId: z.string().optional().describe("Optional filter by subject ID"),
+        chapterId: z.string().optional().describe("Optional filter by chapter ID"),
+        taskId: z.string().optional().describe("Optional filter by task ID or task type (e.g. 'revision')")
+      })
+    },
+    async (args: any) => {
+      try {
+        const [timeSnap, subSnap, chapSnap] = await Promise.all([
+          get(ref(db, "timeLogs")),
+          get(ref(db, "subjects")),
+          get(ref(db, "chapters"))
+        ]);
+
+        const rawTimeLogs = timeSnap.val() || {};
+        const rawSubjects = subSnap.val() || {};
+        const rawChapters = chapSnap.val() || {};
+
+        let logs = Object.keys(rawTimeLogs).map(k => ({
+          id: k,
+          ...rawTimeLogs[k]
+        }));
+
+        // Apply filters if provided
+        if (args.subjectId) logs = logs.filter(l => l.subjectId === args.subjectId);
+        if (args.chapterId) logs = logs.filter(l => l.chapterId === args.chapterId);
+        if (args.taskId) logs = logs.filter(l => l.taskId === args.taskId);
+
+        // Sort descending by timestamp
+        logs.sort((a, b) => new Date(b.timestamp || b.createdAt).getTime() - new Date(a.timestamp || a.createdAt).getTime());
+
+        // 1. Overall Summary
+        const totalMinutes = logs.reduce((sum, l) => sum + (l.timeSpentMinutes || 0), 0);
+        const sessionCount = logs.length;
+        const averageSessionMinutes = sessionCount > 0 ? Math.round(totalMinutes / sessionCount) : 0;
+
+        const formatDur = (mins: number) => {
+          if (!mins || mins <= 0) return "0m";
+          const h = Math.floor(mins / 60);
+          const m = mins % 60;
+          if (h === 0) return `${m}m`;
+          if (m === 0) return `${h}h`;
+          return `${h}h ${m}m`;
+        };
+
+        // 2. Task Type Empirical Benchmarks (across multiple sessions)
+        const taskGroups: Record<string, {
+          taskId: string;
+          taskName: string;
+          durations: number[];
+          sampleChapters: Set<string>;
+        }> = {};
+
+        for (const log of logs) {
+          const key = log.taskName || log.taskId || "General Study";
+          if (!taskGroups[key]) {
+            taskGroups[key] = {
+              taskId: log.taskId,
+              taskName: log.taskName || log.taskId,
+              durations: [],
+              sampleChapters: new Set()
+            };
+          }
+          taskGroups[key].durations.push(log.timeSpentMinutes || 0);
+          const chap = rawChapters[log.chapterId];
+          if (chap) taskGroups[key].sampleChapters.add(chap.title);
+        }
+
+        const taskBenchmarks = Object.values(taskGroups).map(g => {
+          const totalTaskMins = g.durations.reduce((sum, d) => sum + d, 0);
+          const count = g.durations.length;
+          const avgMins = count > 0 ? Math.round(totalTaskMins / count) : 0;
+          return {
+            taskId: g.taskId,
+            taskName: g.taskName,
+            totalMinutes: totalTaskMins,
+            totalFormatted: formatDur(totalTaskMins),
+            sessionCount: count,
+            averageMinutesPerSession: avgMins,
+            averageFormatted: formatDur(avgMins),
+            minMinutes: count > 0 ? Math.min(...g.durations) : 0,
+            maxMinutes: count > 0 ? Math.max(...g.durations) : 0,
+            sampleChapters: Array.from(g.sampleChapters).slice(0, 5)
+          };
+        }).sort((a, b) => b.totalMinutes - a.totalMinutes);
+
+        // 3. Chapter Breakdown & Time Sinks
+        const chapterGroups: Record<string, {
+          chapterId: string;
+          chapterTitle: string;
+          subjectName: string;
+          totalMinutes: number;
+          sessionCount: number;
+          taskBreakdown: Record<string, number>;
+        }> = {};
+
+        for (const log of logs) {
+          if (!chapterGroups[log.chapterId]) {
+            const chap = rawChapters[log.chapterId];
+            const sub = rawSubjects[log.subjectId || (chap ? chap.subjectId : "")];
+            chapterGroups[log.chapterId] = {
+              chapterId: log.chapterId,
+              chapterTitle: chap ? chap.title : "Unknown Chapter",
+              subjectName: sub ? sub.name : "Unknown Subject",
+              totalMinutes: 0,
+              sessionCount: 0,
+              taskBreakdown: {}
+            };
+          }
+          const c = chapterGroups[log.chapterId];
+          c.totalMinutes += log.timeSpentMinutes || 0;
+          c.sessionCount += 1;
+          const tName = log.taskName || log.taskId;
+          c.taskBreakdown[tName] = (c.taskBreakdown[tName] || 0) + (log.timeSpentMinutes || 0);
+        }
+
+        const chapterStats = Object.values(chapterGroups)
+          .map(c => ({
+            ...c,
+            totalFormatted: formatDur(c.totalMinutes),
+            averagePerSession: Math.round(c.totalMinutes / c.sessionCount)
+          }))
+          .sort((a, b) => b.totalMinutes - a.totalMinutes);
+
+        // 4. Subject Breakdown
+        const subjectGroups: Record<string, { subjectId: string; subjectName: string; totalMinutes: number; sessionCount: number }> = {};
+        for (const log of logs) {
+          const sId = log.subjectId || (rawChapters[log.chapterId]?.subjectId) || "unknown";
+          if (!subjectGroups[sId]) {
+            const sub = rawSubjects[sId];
+            subjectGroups[sId] = {
+              subjectId: sId,
+              subjectName: sub ? sub.name : "Unknown Subject",
+              totalMinutes: 0,
+              sessionCount: 0
+            };
+          }
+          subjectGroups[sId].totalMinutes += log.timeSpentMinutes || 0;
+          subjectGroups[sId].sessionCount += 1;
+        }
+
+        const subjectStats = Object.values(subjectGroups)
+          .map(s => ({
+            ...s,
+            totalFormatted: formatDur(s.totalMinutes)
+          }))
+          .sort((a, b) => b.totalMinutes - a.totalMinutes);
+
+        // 5. Recent Sessions (last 15)
+        const recentSessions = logs.slice(0, 15).map(l => {
+          const chap = rawChapters[l.chapterId];
+          const sub = rawSubjects[l.subjectId || (chap ? chap.subjectId : "")];
+          return {
+            id: l.id,
+            timestamp: l.timestamp,
+            duration: formatDur(l.timeSpentMinutes),
+            minutes: l.timeSpentMinutes,
+            chapterTitle: chap ? chap.title : "Unknown Chapter",
+            subjectName: sub ? sub.name : "Unknown Subject",
+            taskName: l.taskName || l.taskId,
+            notes: l.notes || ""
+          };
+        });
+
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              summary: {
+                totalMinutes,
+                totalTimeFormatted: formatDur(totalMinutes),
+                totalSessions: sessionCount,
+                averageSessionMinutes,
+                averageSessionFormatted: formatDur(averageSessionMinutes),
+                filterApplied: {
+                  subjectId: args.subjectId || null,
+                  chapterId: args.chapterId || null,
+                  taskId: args.taskId || null
+                }
+              },
+              taskTypeBenchmarks: taskBenchmarks,
+              chapterRankings: chapterStats,
+              subjectBreakdown: subjectStats,
+              recentSessions
+            }, null, 2)
+          }]
+        };
+      } catch (error: any) {
+        return { content: [{ type: "text", text: `Error: ${error.message}` }], isError: true };
+      }
+    }
+  );
+
+  server.registerTool(
+    "manage_time_logs",
+    {
+      title: "Manage Study Time Logs",
+      description: "Lists or deletes individual study time records. Allows cleaning up erroneous entries or test logs.",
+      inputSchema: z.object({
+        action: z.enum(['list', 'delete']).describe("The action to perform: 'list' or 'delete'"),
+        id: z.string().optional().describe("ID of the time log entry to delete (required for 'delete')"),
+        limit: z.number().optional().describe("Maximum number of entries to return on 'list' (defaults to 30)")
+      })
+    },
+    async (args: any) => {
+      try {
+        if (args.action === 'delete') {
+          if (!args.id) {
+            return { content: [{ type: "text", text: "Error: 'id' is required to delete a time log entry." }], isError: true };
+          }
+          const tSnap = await get(ref(db, `timeLogs/${args.id}`));
+          if (!tSnap.exists()) {
+            return { content: [{ type: "text", text: `Error: Time log entry with ID '${args.id}' not found.` }], isError: true };
+          }
+          await remove(ref(db, `timeLogs/${args.id}`));
+          return { content: [{ type: "text", text: `Time log entry '${args.id}' deleted successfully.` }] };
+        }
+
+        if (args.action === 'list') {
+          const tSnap = await get(ref(db, "timeLogs"));
+          const raw = tSnap.val() || {};
+          const list = Object.keys(raw).map(k => ({ id: k, ...raw[k] }));
+          list.sort((a, b) => new Date(b.timestamp || b.createdAt).getTime() - new Date(a.timestamp || a.createdAt).getTime());
+          const max = args.limit || 30;
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                total: list.length,
+                logs: list.slice(0, max)
+              }, null, 2)
+            }]
+          };
+        }
+
+        return { content: [{ type: "text", text: `Error: Unsupported action '${args.action}'. Supported actions are 'list' and 'delete'.` }], isError: true };
+      } catch (error: any) {
+        return { content: [{ type: "text", text: `Error: ${error.message}` }], isError: true };
+      }
+    }
+  );
+
 };
+
 
