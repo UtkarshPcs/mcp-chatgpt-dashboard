@@ -1,7 +1,12 @@
 import { Chapter, TimeLog } from "@/types";
 import { calculateCompletion, calculateRevisionProgress } from "@/utils/calculations";
-import { calculateTotalStudyTime, calculateAverageSessionTime, formatDuration } from "@/utils/timeCalculations";
-import { Clock, Timer, Flame } from "lucide-react";
+import { 
+  calculateTotalStudyTime, 
+  calculateAverageSessionTime, 
+  calculatePeriodicStudyStats, 
+  formatDuration 
+} from "@/utils/timeCalculations";
+import { Clock, Timer, Flame, Calendar, TrendingUp, Sparkles } from "lucide-react";
 
 interface AnalyticsOverviewProps {
   chapters: Chapter[];
@@ -17,6 +22,7 @@ export function AnalyticsOverview({ chapters, timeLogs = [] }: AnalyticsOverview
 
   const totalMinutes = calculateTotalStudyTime(timeLogs);
   const avgSessionMinutes = calculateAverageSessionTime(timeLogs);
+  const periodicStats = calculatePeriodicStudyStats(timeLogs);
 
   return (
     <section className="grid grid-cols-1 lg:grid-cols-4 gap-6">
@@ -71,40 +77,52 @@ export function AnalyticsOverview({ chapters, timeLogs = [] }: AnalyticsOverview
           ))}
         </div>
 
-        {/* Study Time Intelligence Bar */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div className="bg-zinc-900/40 border border-zinc-800/80 rounded-2xl p-4 flex items-center gap-3.5">
-            <div className="w-10 h-10 rounded-xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center flex-shrink-0">
-              <Clock className="w-5 h-5 text-cyan-400" />
+        {/* Study Hours Rhythm Bar - Daily, Weekly, Monthly, Total */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="bg-zinc-900/40 border border-zinc-800/80 rounded-2xl p-3.5 flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center flex-shrink-0">
+              <Calendar className="w-4 h-4 text-cyan-400" />
             </div>
-            <div>
-              <span className="text-zinc-500 text-xs font-medium block">Total Study Time</span>
-              <span className="text-xl font-bold text-cyan-300">
-                {totalMinutes > 0 ? formatDuration(totalMinutes) : "0m"}
+            <div className="min-w-0">
+              <span className="text-zinc-500 text-[11px] font-medium block">Today</span>
+              <span className="text-lg font-bold text-cyan-300">
+                {formatDuration(periodicStats.todayMinutes)}
               </span>
             </div>
           </div>
 
-          <div className="bg-zinc-900/40 border border-zinc-800/80 rounded-2xl p-4 flex items-center gap-3.5">
-            <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center flex-shrink-0">
-              <Timer className="w-5 h-5 text-indigo-400" />
+          <div className="bg-zinc-900/40 border border-zinc-800/80 rounded-2xl p-3.5 flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center flex-shrink-0">
+              <TrendingUp className="w-4 h-4 text-indigo-400" />
             </div>
-            <div>
-              <span className="text-zinc-500 text-xs font-medium block">Avg Session Duration</span>
-              <span className="text-xl font-bold text-indigo-300">
-                {avgSessionMinutes > 0 ? formatDuration(avgSessionMinutes) : "0m"}
+            <div className="min-w-0">
+              <span className="text-zinc-500 text-[11px] font-medium block">This Week</span>
+              <span className="text-lg font-bold text-indigo-300">
+                {formatDuration(periodicStats.thisWeekMinutes)}
               </span>
             </div>
           </div>
 
-          <div className="bg-zinc-900/40 border border-zinc-800/80 rounded-2xl p-4 flex items-center gap-3.5">
-            <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center flex-shrink-0">
-              <Flame className="w-5 h-5 text-emerald-400" />
+          <div className="bg-zinc-900/40 border border-zinc-800/80 rounded-2xl p-3.5 flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center flex-shrink-0">
+              <Sparkles className="w-4 h-4 text-emerald-400" />
             </div>
-            <div>
-              <span className="text-zinc-500 text-xs font-medium block">Logged Sessions</span>
-              <span className="text-xl font-bold text-emerald-300">
-                {timeLogs.length} {timeLogs.length === 1 ? 'Session' : 'Sessions'}
+            <div className="min-w-0">
+              <span className="text-zinc-500 text-[11px] font-medium block">This Month</span>
+              <span className="text-lg font-bold text-emerald-300">
+                {formatDuration(periodicStats.thisMonthMinutes)}
+              </span>
+            </div>
+          </div>
+
+          <div className="bg-zinc-900/40 border border-zinc-800/80 rounded-2xl p-3.5 flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center flex-shrink-0">
+              <Clock className="w-4 h-4 text-purple-400" />
+            </div>
+            <div className="min-w-0">
+              <span className="text-zinc-500 text-[11px] font-medium block">All-Time</span>
+              <span className="text-lg font-bold text-purple-300">
+                {formatDuration(totalMinutes)}
               </span>
             </div>
           </div>

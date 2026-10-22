@@ -8,7 +8,11 @@ import {
   calculateAverageSessionTime, 
   calculateTaskTypeBenchmarks,
   calculateChapterTimeStats,
-  calculateSubjectTime 
+  calculateSubjectTime,
+  calculatePeriodicStudyStats,
+  parseTimeRangeToMinutes,
+  formatTimeRangeDisplay,
+  getLogDate
 } from "@/utils/timeCalculations";
 import { getSubjectColor, getSubjectText } from "@/utils/theme";
 import { 
@@ -21,7 +25,11 @@ import {
   Sparkles, 
   Layers, 
   AlertCircle,
-  X
+  X,
+  Calendar,
+  CalendarDays,
+  Flame,
+  ArrowRight
 } from "lucide-react";
 
 interface TimeAnalyticsViewProps {
@@ -36,6 +44,9 @@ interface TimeAnalyticsViewProps {
     timeSpentMinutes: number;
     notes?: string;
     timestamp?: string;
+    sessionDate?: string;
+    startTime?: string;
+    endTime?: string;
     markTaskCompleted?: boolean;
   }) => Promise<void>;
   onDeleteTimeLog: (id: string) => Promise<void>;
@@ -53,6 +64,7 @@ export function TimeAnalyticsView({
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [modalError, setModalError] = useState("");
+  const [periodicTab, setPeriodicTab] = useState<'daily' | 'weekly' | 'monthly'>('daily');
 
   // Modal form state
   const [formChapterId, setFormChapterId] = useState("");
@@ -61,6 +73,10 @@ export function TimeAnalyticsView({
   const [formMinutes, setFormMinutes] = useState("45");
   const [formNotes, setFormNotes] = useState("");
   const [formMarkComplete, setFormMarkComplete] = useState(false);
+  const [formDate, setFormDate] = useState(() => new Date().toISOString().split("T")[0]);
+  const [formUseTimeRange, setFormUseTimeRange] = useState(false);
+  const [formStartTime, setFormStartTime] = useState("16:30");
+  const [formEndTime, setFormEndTime] = useState("17:30");
 
   // Filtered logs
   const filteredLogs = useMemo(() => {
@@ -84,9 +100,10 @@ export function TimeAnalyticsView({
     }).sort((a, b) => new Date(b.timestamp || b.createdAt).getTime() - new Date(a.timestamp || a.createdAt).getTime());
   }, [timeLogs, selectedSubjectFilter, searchQuery, chapters, subjects]);
 
-  // Overall metrics
+  // Overall metrics & Periodic study stats
   const totalMinutes = useMemo(() => calculateTotalStudyTime(timeLogs), [timeLogs]);
   const avgSessionMinutes = useMemo(() => calculateAverageSessionTime(timeLogs), [timeLogs]);
+  const periodicStats = useMemo(() => calculatePeriodicStudyStats(timeLogs), [timeLogs]);
   
   // Empirical task benchmarks
   const taskBenchmarks = useMemo(() => calculateTaskTypeBenchmarks(timeLogs, subjects), [timeLogs, subjects]);
@@ -120,12 +137,41 @@ export function TimeAnalyticsView({
     } else if (chapters.length > 0 && !formChapterId) {
       setFormChapterId(chapters[0].id);
     }
+    setFormDate(new Date().toISOString().split("T")[0]);
+    setFormUseTimeRange(false);
+    setFormStartTime("16:30");
+    setFormEndTime("17:30");
     setFormMinutes("45");
     setFormNotes("");
     setFormMarkComplete(false);
     setModalError("");
     setIsModalOpen(true);
   };
+
+  const handleStartTimeChange = (val: string) => {
+    setFormStartTime(val);
+    if (val && formEndTime) {
+      const diff = parseTimeRangeToMinutes(val, formEndTime);
+      if (diff !== null && diff > 0) {
+        setFormMinutes(diff.toString());
+      }
+    }
+  };
+
+  const handleEndTimeChange = (val: string) => {
+    setFormEndTime(val);
+    if (formStartTime && val) {
+      const diff = parseTimeRangeToMinutes(formStartTime, val);
+      if (diff !== null && diff > 0) {
+        setFormMinutes(diff.toString());
+      }
+    }
+  };
+
+  const calculatedIntervalMinutes = useMemo(() => {
+    if (!formUseTimeRange || !formStartTime || !formEndTime) return null;
+    return parseTimeRangeToMinutes(formStartTime, formEndTime);
+  }, [formUseTimeRange, formStartTime, formEndTime]);
 
   const handleSubmitLog = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -169,6 +215,9 @@ export function TimeAnalyticsView({
         taskId: finalTaskId,
         taskName: finalTaskName,
         timeSpentMinutes: mins,
+        sessionDate: formDate,
+        startTime: formUseTimeRange ? formStartTime : undefined,
+        endTime: formUseTimeRange ? formEndTime : undefined,
         notes: formNotes,
         markTaskCompleted: formMarkComplete
       });
@@ -203,38 +252,44 @@ export function TimeAnalyticsView({
         </button>
       </div>
 
-      {/* Primary KPI Row */}
+      {/* Primary KPI Row - Daily, Weekly, Monthly, All-Time */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-zinc-900/40 border border-zinc-800 rounded-2xl p-5 flex items-center gap-4">
           <div className="w-12 h-12 rounded-xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center flex-shrink-0">
-            <Clock className="w-6 h-6 text-cyan-400" />
+            <Calendar className="w-6 h-6 text-cyan-400" />
           </div>
-          <div>
-            <span className="text-xs text-zinc-500 font-medium block">Total Study Time</span>
-            <span className="text-2xl font-bold text-white">{formatDuration(totalMinutes)}</span>
-            <span className="text-[10px] text-cyan-400 block mt-0.5">{totalMinutes} total minutes</span>
+          <div className="min-w-0">
+            <span className="text-xs text-zinc-500 font-medium block">Today&apos;s Study</span>
+            <span className="text-2xl font-bold text-white">{formatDuration(periodicStats.todayMinutes)}</span>
+            <span className="text-[10px] text-cyan-400 block mt-0.5 truncate">
+              {periodicStats.dailyAverageMinutes > 0 ? `Avg: ${formatDuration(periodicStats.dailyAverageMinutes)}/day` : 'First sitting of the day'}
+            </span>
           </div>
         </div>
 
         <div className="bg-zinc-900/40 border border-zinc-800 rounded-2xl p-5 flex items-center gap-4">
           <div className="w-12 h-12 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center flex-shrink-0">
-            <Timer className="w-6 h-6 text-indigo-400" />
+            <TrendingUp className="w-6 h-6 text-indigo-400" />
           </div>
-          <div>
-            <span className="text-xs text-zinc-500 font-medium block">Average Session</span>
-            <span className="text-2xl font-bold text-white">{formatDuration(avgSessionMinutes)}</span>
-            <span className="text-[10px] text-indigo-400 block mt-0.5">per study sitting</span>
+          <div className="min-w-0">
+            <span className="text-xs text-zinc-500 font-medium block">This Week</span>
+            <span className="text-2xl font-bold text-white">{formatDuration(periodicStats.thisWeekMinutes)}</span>
+            <span className="text-[10px] text-indigo-400 block mt-0.5 truncate">
+              {periodicStats.weeklyAverageMinutes > 0 ? `Avg: ${formatDuration(periodicStats.weeklyAverageMinutes)}/wk` : 'Mon – Sun cadence'}
+            </span>
           </div>
         </div>
 
         <div className="bg-zinc-900/40 border border-zinc-800 rounded-2xl p-5 flex items-center gap-4">
           <div className="w-12 h-12 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center flex-shrink-0">
-            <TrendingUp className="w-6 h-6 text-emerald-400" />
+            <Sparkles className="w-6 h-6 text-emerald-400" />
           </div>
-          <div>
-            <span className="text-xs text-zinc-500 font-medium block">Total Sessions</span>
-            <span className="text-2xl font-bold text-white">{timeLogs.length}</span>
-            <span className="text-[10px] text-emerald-400 block mt-0.5">historical records</span>
+          <div className="min-w-0">
+            <span className="text-xs text-zinc-500 font-medium block">This Month</span>
+            <span className="text-2xl font-bold text-white">{formatDuration(periodicStats.thisMonthMinutes)}</span>
+            <span className="text-[10px] text-emerald-400 block mt-0.5 truncate">
+              Monthly cumulative total
+            </span>
           </div>
         </div>
 
@@ -242,12 +297,237 @@ export function TimeAnalyticsView({
           <div className="w-12 h-12 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center flex-shrink-0">
             <Layers className="w-6 h-6 text-purple-400" />
           </div>
-          <div>
-            <span className="text-xs text-zinc-500 font-medium block">Most Studied Subject</span>
-            <span className="text-lg font-bold text-white truncate max-w-[140px] block">{topSubject}</span>
-            <span className="text-[10px] text-purple-400 block mt-0.5">highest time allocation</span>
+          <div className="min-w-0">
+            <span className="text-xs text-zinc-500 font-medium block">Total All-Time</span>
+            <span className="text-2xl font-bold text-white">{formatDuration(totalMinutes)}</span>
+            <span className="text-[10px] text-purple-400 block mt-0.5 truncate">
+              {timeLogs.length} session{timeLogs.length === 1 ? '' : 's'} · Top: {topSubject}
+            </span>
           </div>
         </div>
+      </div>
+
+      {/* Periodic Study Rhythm Visualizer */}
+      <div className="bg-zinc-900/40 border border-zinc-800 rounded-2xl p-6 space-y-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <CalendarDays className="w-5 h-5 text-cyan-400" />
+              <h3 className="text-lg font-bold text-white">Study Velocity & Cadence</h3>
+            </div>
+            <p className="text-xs text-zinc-400">
+              Visualize your daily consistency, weekly load, and monthly trends.
+            </p>
+          </div>
+
+          {/* Timeframe Switcher */}
+          <div className="inline-flex p-1 bg-zinc-950 border border-zinc-800 rounded-xl self-start sm:self-auto">
+            <button
+              onClick={() => setPeriodicTab('daily')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                periodicTab === 'daily'
+                  ? 'bg-cyan-500 text-zinc-950 font-semibold shadow-sm shadow-cyan-500/20'
+                  : 'text-zinc-400 hover:text-zinc-200'
+              }`}
+            >
+              Daily (14 Days)
+            </button>
+            <button
+              onClick={() => setPeriodicTab('weekly')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                periodicTab === 'weekly'
+                  ? 'bg-cyan-500 text-zinc-950 font-semibold shadow-sm shadow-cyan-500/20'
+                  : 'text-zinc-400 hover:text-zinc-200'
+              }`}
+            >
+              Weekly (6 Weeks)
+            </button>
+            <button
+              onClick={() => setPeriodicTab('monthly')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                periodicTab === 'monthly'
+                  ? 'bg-cyan-500 text-zinc-950 font-semibold shadow-sm shadow-cyan-500/20'
+                  : 'text-zinc-400 hover:text-zinc-200'
+              }`}
+            >
+              Monthly (6 Months)
+            </button>
+          </div>
+        </div>
+
+        {/* Tab 1: Daily Trend (14 Days) */}
+        {periodicTab === 'daily' && (
+          <div className="space-y-3">
+            <div className="grid grid-cols-7 sm:grid-cols-14 gap-2 pt-4">
+              {(() => {
+                const maxMins = Math.max(...periodicStats.dailyTrend.map(d => d.minutes), 60);
+                return periodicStats.dailyTrend.map((d) => {
+                  const pct = Math.min(100, Math.max(d.minutes > 0 ? 12 : 0, Math.round((d.minutes / maxMins) * 100)));
+                  return (
+                    <div key={d.date} className="flex flex-col items-center group">
+                      {/* Duration text indicator */}
+                      <span className="text-[10px] font-mono h-4 flex items-center justify-center font-semibold text-zinc-400 group-hover:text-cyan-300">
+                        {d.minutes > 0 ? d.formatted : ""}
+                      </span>
+
+                      {/* Bar Track */}
+                      <div className={`w-full h-32 rounded-xl bg-zinc-950/70 border flex flex-col justify-end p-1 transition-all ${
+                        d.isToday 
+                          ? 'border-cyan-500/60 shadow-lg shadow-cyan-500/10' 
+                          : 'border-zinc-800/80 hover:border-zinc-700'
+                      }`}>
+                        <div 
+                          style={{ height: `${pct}%` }}
+                          className={`w-full rounded-lg transition-all duration-500 ${
+                            d.isToday 
+                              ? 'bg-gradient-to-t from-cyan-600 to-cyan-400 shadow-sm shadow-cyan-500/30'
+                              : d.minutes > 0 
+                                ? 'bg-gradient-to-t from-indigo-600/80 to-cyan-500/80 group-hover:from-indigo-500 group-hover:to-cyan-400' 
+                                : 'bg-transparent'
+                          }`}
+                        />
+                      </div>
+
+                      {/* Day Labels */}
+                      <div className="mt-2 text-center">
+                        <span className={`block text-[11px] font-medium leading-none ${
+                          d.isToday ? 'text-cyan-400 font-bold' : 'text-zinc-400'
+                        }`}>
+                          {d.shortDay}
+                        </span>
+                        <span className={`block text-[10px] font-mono mt-0.5 leading-none ${
+                          d.isToday ? 'text-cyan-300 font-bold' : 'text-zinc-500'
+                        }`}>
+                          {d.date.slice(8)}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                });
+              })()}
+            </div>
+            <div className="flex items-center justify-between text-[11px] text-zinc-500 pt-2 border-t border-zinc-800/60">
+              <div className="flex items-center gap-3">
+                <span className="flex items-center gap-1.5">
+                  <span className="w-2.5 h-2.5 rounded-sm bg-cyan-500"></span> Today
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="w-2.5 h-2.5 rounded-sm bg-indigo-500"></span> Study Day
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="w-2.5 h-2.5 rounded-sm bg-zinc-800"></span> Rest Day
+                </span>
+              </div>
+              <span>Showing last 14 consecutive calendar days</span>
+            </div>
+          </div>
+        )}
+
+        {/* Tab 2: Weekly Trend (6 Weeks) */}
+        {periodicTab === 'weekly' && (
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 pt-3">
+              {(() => {
+                const maxMins = Math.max(...periodicStats.weeklyTrend.map(w => w.minutes), 120);
+                return periodicStats.weeklyTrend.map((w) => {
+                  const pct = Math.min(100, Math.max(w.minutes > 0 ? 12 : 0, Math.round((w.minutes / maxMins) * 100)));
+                  return (
+                    <div key={w.weekKey} className="flex flex-col items-center group">
+                      <span className="text-xs font-mono h-5 flex items-center font-bold text-zinc-300 group-hover:text-indigo-300">
+                        {w.formatted}
+                      </span>
+                      <div className={`w-full h-36 rounded-xl bg-zinc-950/70 border flex flex-col justify-end p-1.5 transition-all ${
+                        w.isCurrentWeek 
+                          ? 'border-indigo-500/60 shadow-lg shadow-indigo-500/10' 
+                          : 'border-zinc-800/80 hover:border-zinc-700'
+                      }`}>
+                        <div 
+                          style={{ height: `${pct}%` }}
+                          className={`w-full rounded-lg transition-all duration-500 ${
+                            w.isCurrentWeek 
+                              ? 'bg-gradient-to-t from-indigo-600 to-indigo-400 shadow-sm shadow-indigo-500/30'
+                              : w.minutes > 0 
+                                ? 'bg-gradient-to-t from-zinc-700 to-indigo-500/70 group-hover:from-zinc-600 group-hover:to-indigo-400' 
+                                : 'bg-transparent'
+                          }`}
+                        />
+                      </div>
+                      <div className="mt-2 text-center">
+                        <span className={`block text-[11px] font-medium ${
+                          w.isCurrentWeek ? 'text-indigo-400 font-bold' : 'text-zinc-300'
+                        }`}>
+                          {w.label}
+                        </span>
+                        <span className="block text-[10px] text-zinc-500 font-mono mt-0.5">
+                          {w.sessionCount} sitting{w.sessionCount === 1 ? '' : 's'}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                });
+              })()}
+            </div>
+            <div className="flex items-center justify-between text-[11px] text-zinc-500 pt-2 border-t border-zinc-800/60">
+              <span className="flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-sm bg-indigo-500"></span> Monday – Sunday Standard Study Week
+              </span>
+              <span>Showing last 6 study weeks</span>
+            </div>
+          </div>
+        )}
+
+        {/* Tab 3: Monthly Trend (6 Months) */}
+        {periodicTab === 'monthly' && (
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 pt-3">
+              {(() => {
+                const maxMins = Math.max(...periodicStats.monthlyTrend.map(m => m.minutes), 300);
+                return periodicStats.monthlyTrend.map((m) => {
+                  const pct = Math.min(100, Math.max(m.minutes > 0 ? 12 : 0, Math.round((m.minutes / maxMins) * 100)));
+                  return (
+                    <div key={m.monthKey} className="flex flex-col items-center group">
+                      <span className="text-xs font-mono h-5 flex items-center font-bold text-zinc-300 group-hover:text-emerald-300">
+                        {m.formatted}
+                      </span>
+                      <div className={`w-full h-36 rounded-xl bg-zinc-950/70 border flex flex-col justify-end p-1.5 transition-all ${
+                        m.isCurrentMonth 
+                          ? 'border-emerald-500/60 shadow-lg shadow-emerald-500/10' 
+                          : 'border-zinc-800/80 hover:border-zinc-700'
+                      }`}>
+                        <div 
+                          style={{ height: `${pct}%` }}
+                          className={`w-full rounded-lg transition-all duration-500 ${
+                            m.isCurrentMonth 
+                              ? 'bg-gradient-to-t from-emerald-600 to-emerald-400 shadow-sm shadow-emerald-500/30'
+                              : m.minutes > 0 
+                                ? 'bg-gradient-to-t from-zinc-700 to-emerald-500/70 group-hover:from-zinc-600 group-hover:to-emerald-400' 
+                                : 'bg-transparent'
+                          }`}
+                        />
+                      </div>
+                      <div className="mt-2 text-center">
+                        <span className={`block text-[11px] font-medium ${
+                          m.isCurrentMonth ? 'text-emerald-400 font-bold' : 'text-zinc-300'
+                        }`}>
+                          {m.label}
+                        </span>
+                        <span className="block text-[10px] text-zinc-500 font-mono mt-0.5">
+                          {m.sessionCount} sitting{m.sessionCount === 1 ? '' : 's'}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                });
+              })()}
+            </div>
+            <div className="flex items-center justify-between text-[11px] text-zinc-500 pt-2 border-t border-zinc-800/60">
+              <span className="flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-sm bg-emerald-500"></span> Monthly Cumulative Volume
+              </span>
+              <span>Showing last 6 calendar months</span>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Empirical Task Benchmarks (The core request for AI schedule baselines) */}
@@ -412,7 +692,7 @@ export function TimeAnalyticsView({
             <table className="w-full text-left text-xs">
               <thead>
                 <tr className="border-b border-zinc-800 text-zinc-500">
-                  <th className="py-2.5 px-3">Date</th>
+                  <th className="py-2.5 px-3">Date & Session Time</th>
                   <th className="py-2.5 px-3">Subject</th>
                   <th className="py-2.5 px-3">Chapter</th>
                   <th className="py-2.5 px-3">Task</th>
@@ -425,21 +705,34 @@ export function TimeAnalyticsView({
                 {filteredLogs.map(log => {
                   const chap = chapters.find(c => c.id === log.chapterId);
                   const sub = subjects.find(s => s.id === log.subjectId);
-                  const dateStr = new Date(log.timestamp || log.createdAt).toLocaleDateString(undefined, {
+                  const lDate = getLogDate(log);
+                  const dateStr = lDate.toLocaleDateString(undefined, {
                     month: 'short',
                     day: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit'
+                    year: 'numeric'
                   });
+                  const timeRange = formatTimeRangeDisplay(log.startTime, log.endTime);
 
                   return (
                     <tr key={log.id} className="hover:bg-zinc-900/40 transition-colors">
-                      <td className="py-3 px-3 text-zinc-400 font-mono whitespace-nowrap">{dateStr}</td>
+                      <td className="py-3 px-3 text-zinc-400 font-mono whitespace-nowrap">
+                        <div className="font-medium text-zinc-300">{dateStr}</div>
+                        {timeRange ? (
+                          <div className="mt-1 inline-flex items-center gap-1.5 text-[10px] text-cyan-300 bg-cyan-950/40 px-2 py-0.5 rounded border border-cyan-800/40">
+                            <Clock className="w-3 h-3 text-cyan-400" />
+                            <span>{timeRange}</span>
+                          </div>
+                        ) : (
+                          <div className="text-[10px] text-zinc-500 mt-0.5">
+                            {new Date(log.timestamp || log.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </div>
+                        )}
+                      </td>
                       <td className="py-3 px-3 font-medium text-zinc-300">{sub ? sub.name : "Unknown"}</td>
                       <td className="py-3 px-3 text-zinc-200 font-medium max-w-[200px] truncate">{chap ? chap.title : "Unknown"}</td>
                       <td className="py-3 px-3 text-cyan-300 font-medium">{log.taskName || log.taskId}</td>
                       <td className="py-3 px-3 whitespace-nowrap">
-                        <span className="font-mono font-bold text-cyan-400 bg-cyan-950/40 px-2 py-0.5 rounded border border-cyan-500/20">
+                        <span className="font-mono font-bold text-cyan-400 bg-cyan-950/40 px-2.5 py-1 rounded border border-cyan-500/20">
                           {formatDuration(log.timeSpentMinutes)}
                         </span>
                       </td>
@@ -555,19 +848,87 @@ export function TimeAnalyticsView({
                 </div>
               )}
 
+              {/* Session Date */}
+              <div className="space-y-1.5">
+                <label className="text-zinc-400 font-medium">Session Date *</label>
+                <input
+                  type="date"
+                  value={formDate}
+                  onChange={(e) => setFormDate(e.target.value)}
+                  className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-zinc-200 font-mono focus:outline-none focus:border-cyan-500"
+                />
+              </div>
+
+              {/* Time Range Option */}
+              <div className="space-y-2 pt-1 pb-1">
+                <label className="flex items-center gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={formUseTimeRange}
+                    onChange={(e) => {
+                      setFormUseTimeRange(e.target.checked);
+                      if (e.target.checked && formStartTime && formEndTime) {
+                        const diff = parseTimeRangeToMinutes(formStartTime, formEndTime);
+                        if (diff !== null && diff > 0) setFormMinutes(diff.toString());
+                      }
+                    }}
+                    className="rounded bg-zinc-900 border-zinc-700 text-cyan-500 focus:ring-0"
+                  />
+                  <span className="text-zinc-300 font-medium">Record specific time window (e.g. 4:30 PM – 5:30 PM)</span>
+                </label>
+
+                {formUseTimeRange && (
+                  <div className="grid grid-cols-2 gap-3 p-3 rounded-xl bg-zinc-900/60 border border-zinc-800">
+                    <div>
+                      <label className="text-zinc-400 font-medium text-[11px] block mb-1">Start Time</label>
+                      <input
+                        type="time"
+                        value={formStartTime}
+                        onChange={(e) => handleStartTimeChange(e.target.value)}
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-zinc-200 font-mono focus:outline-none focus:border-cyan-500 text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-zinc-400 font-medium text-[11px] block mb-1">End Time</label>
+                      <input
+                        type="time"
+                        value={formEndTime}
+                        onChange={(e) => handleEndTimeChange(e.target.value)}
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-zinc-200 font-mono focus:outline-none focus:border-cyan-500 text-xs"
+                      />
+                    </div>
+                    {calculatedIntervalMinutes !== null && (
+                      <div className="col-span-2 text-[11px] text-cyan-400 flex items-center justify-between pt-1 border-t border-zinc-800/80">
+                        <span>Auto-calculated duration:</span>
+                        <span className="font-mono font-semibold">
+                          {formatDuration(calculatedIntervalMinutes)} ({calculatedIntervalMinutes} mins)
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
               {/* Time Spent (Minutes) */}
               <div className="space-y-1.5">
-                <label className="text-zinc-400 font-medium">Time Spent (Minutes) *</label>
+                <div className="flex items-center justify-between">
+                  <label className="text-zinc-400 font-medium">Time Spent (Minutes) *</label>
+                  {formUseTimeRange && (
+                    <span className="text-[10px] text-zinc-500">Auto-filled from time range (editable)</span>
+                  )}
+                </div>
                 <div className="flex items-center gap-2">
                   <input
                     type="number"
                     min="1"
-                    max="600"
+                    max="1440"
                     value={formMinutes}
                     onChange={(e) => setFormMinutes(e.target.value)}
                     className="w-32 bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-zinc-200 font-mono focus:outline-none focus:border-cyan-500"
                   />
-                  <span className="text-zinc-500">minutes ({formatDuration(parseInt(formMinutes, 10) || 0)})</span>
+                  <span className="text-zinc-500 font-mono">
+                    minutes ({formatDuration(parseInt(formMinutes, 10) || 0)})
+                  </span>
                 </div>
               </div>
 

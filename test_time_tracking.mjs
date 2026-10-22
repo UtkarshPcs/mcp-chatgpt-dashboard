@@ -95,6 +95,20 @@ async function run() {
   const log4IdMatch = log4Res.result.content[0].text.match(/Log ID:\s*([^\n]+)/);
   if (log4IdMatch) createdLogIds.push(log4IdMatch[1].trim());
 
+  // 6.1 Test log_task_time - Session 5 (Interval 16:30 to 17:30 without explicit timeSpentMinutes)
+  console.log("\n[Test 3.5] Logging Session 5: Interval '16:30' to '17:30' (auto duration derivation)...");
+  const log5Res = await mcpCall('log_task_time', {
+    chapterId: testChapter.id,
+    taskId: 'm_concept',
+    date: '2026-10-22',
+    startTime: '16:30',
+    endTime: '17:30',
+    notes: 'Test Session 5: Evening theory study with time interval'
+  });
+  console.log("Response:", log5Res.result.content[0].text);
+  const log5IdMatch = log5Res.result.content[0].text.match(/Log ID:\s*([^\n]+)/);
+  if (log5IdMatch) createdLogIds.push(log5IdMatch[1].trim());
+
   // 7. Verify Task Completion
   console.log("\n[Test 4] Verifying task completion state in get_syllabus_state...");
   const stateRes2 = await mcpCall('get_syllabus_state', {});
@@ -116,15 +130,44 @@ async function run() {
   const conceptBenchmark = analytics.taskTypeBenchmarks.find(b => b.taskId === 'm_concept');
   if (conceptBenchmark) {
     console.log(`✓ 'm_concept' empirical benchmark: average = ${conceptBenchmark.averageMinutesPerSession}m across ${conceptBenchmark.sessionCount} sessions (min: ${conceptBenchmark.minMinutes}m, max: ${conceptBenchmark.maxMinutes}m, total: ${conceptBenchmark.totalMinutes}m)`);
-    if (conceptBenchmark.averageMinutesPerSession !== 35) {
-      throw new Error(`Expected average of 35m for m_concept, got ${conceptBenchmark.averageMinutesPerSession}`);
+    if (conceptBenchmark.averageMinutesPerSession !== 43) {
+      throw new Error(`Expected average of 43m for m_concept, got ${conceptBenchmark.averageMinutesPerSession}`);
     }
-    if (conceptBenchmark.sessionCount !== 2) {
-      throw new Error(`Expected 2 sessions for m_concept, got ${conceptBenchmark.sessionCount}`);
+    if (conceptBenchmark.sessionCount !== 3) {
+      throw new Error(`Expected 3 sessions for m_concept, got ${conceptBenchmark.sessionCount}`);
     }
   } else {
     throw new Error("m_concept benchmark not found");
   }
+
+  // Verify Periodic Summary & Time Range in Recent Sessions
+  console.log("\n[Test 5.1] Verifying periodicSummary in analytics...");
+  if (!analytics.periodicSummary) throw new Error("Missing periodicSummary in analytics");
+  console.log("Periodic Summary:", JSON.stringify(analytics.periodicSummary, null, 2));
+  if (typeof analytics.periodicSummary.today.minutes !== 'number') {
+    throw new Error("Missing today minutes in periodicSummary");
+  }
+  if (!Array.isArray(analytics.periodicSummary.dailyTrend) || analytics.periodicSummary.dailyTrend.length !== 14) {
+    throw new Error("Expected dailyTrend to have 14 days");
+  }
+  if (!Array.isArray(analytics.periodicSummary.weeklyTrend) || analytics.periodicSummary.weeklyTrend.length !== 6) {
+    throw new Error("Expected weeklyTrend to have 6 weeks");
+  }
+  if (!Array.isArray(analytics.periodicSummary.monthlyTrend) || analytics.periodicSummary.monthlyTrend.length !== 6) {
+    throw new Error("Expected monthlyTrend to have 6 months");
+  }
+
+  const intervalSession = analytics.recentSessions.find(s => s.startTime === '16:30' && s.endTime === '17:30');
+  if (!intervalSession) {
+    throw new Error("Recent session with startTime 16:30 and endTime 17:30 not found");
+  }
+  if (intervalSession.timeRange !== '4:30 PM – 5:30 PM') {
+    throw new Error(`Expected timeRange '4:30 PM – 5:30 PM', got ${intervalSession.timeRange}`);
+  }
+  if (intervalSession.minutes !== 60) {
+    throw new Error(`Expected auto-derived duration 60m, got ${intervalSession.minutes}`);
+  }
+  console.log(`✓ Verified interval session in recentSessions: ${intervalSession.timeRange} (${intervalSession.duration})`);
 
   const revisionBenchmark = analytics.taskTypeBenchmarks.find(b => b.taskId === 'revision');
   if (revisionBenchmark) {

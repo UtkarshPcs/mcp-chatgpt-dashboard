@@ -105,9 +105,51 @@ export interface TimeLog {
   taskName: string;          // Human-readable task name
   timeSpentMinutes: number;  // Time spent in minutes
   timestamp: string;         // ISO date string
+  sessionDate?: string;      // YYYY-MM-DD
+  startTime?: string;        // HH:mm or formatted time (e.g. "16:30" or "04:30 PM")
+  endTime?: string;          // HH:mm or formatted time (e.g. "17:30" or "05:30 PM")
   notes?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface DailyStudyPoint {
+  date: string;              // YYYY-MM-DD
+  label: string;             // e.g. "Thu, Oct 22"
+  shortDay: string;          // e.g. "Thu"
+  minutes: number;
+  formatted: string;         // e.g. "2h 30m"
+  sessionCount: number;
+  isToday: boolean;
+}
+
+export interface WeeklyStudyPoint {
+  weekKey: string;           // e.g. "2026-W43"
+  label: string;             // e.g. "Oct 19 - Oct 25"
+  minutes: number;
+  formatted: string;
+  sessionCount: number;
+  isCurrentWeek: boolean;
+}
+
+export interface MonthlyStudyPoint {
+  monthKey: string;          // e.g. "2026-10"
+  label: string;             // e.g. "Oct 2026"
+  minutes: number;
+  formatted: string;
+  sessionCount: number;
+  isCurrentMonth: boolean;
+}
+
+export interface PeriodicStudyStats {
+  todayMinutes: number;
+  thisWeekMinutes: number;
+  thisMonthMinutes: number;
+  dailyAverageMinutes: number;
+  weeklyAverageMinutes: number;
+  dailyTrend: DailyStudyPoint[];
+  weeklyTrend: WeeklyStudyPoint[];
+  monthlyTrend: MonthlyStudyPoint[];
 }
 
 export interface TaskBenchmark {

@@ -205,25 +205,28 @@ const mcpOutput = {
     },
     {
       "name": "log_task_time",
-      "description": "Logs the time spent on a specific task within a chapter. Records subject, chapter, task, duration in minutes, timestamp, and optional notes. Preserves historical records across repeated sessions without overwriting previous entries. Optionally marks the chapter task as completed.",
+      "description": "Logs the time spent on a specific task within a chapter. Records subject, chapter, task, duration in minutes, optional date, optional start/end time window (e.g. 4:30 PM to 5:30 PM), timestamp, and optional notes. If start and end times are provided, duration is calculated automatically if omitted. Preserves historical records across repeated sessions without overwriting previous entries. Optionally marks the chapter task as completed.",
       "inputSchema": {
         "type": "object",
         "properties": {
           "chapterId": { "type": "string", "description": "The unique ID of the chapter being studied" },
           "taskId": { "type": "string", "description": "The ID of the task (from framework or 'revision' or custom)" },
-          "timeSpentMinutes": { "type": "number", "description": "Duration spent studying in minutes" },
+          "timeSpentMinutes": { "type": "number", "description": "Duration spent studying in minutes (optional if startTime and endTime are provided)" },
+          "date": { "type": "string", "description": "Session date in YYYY-MM-DD format (optional, defaults to current date)" },
+          "startTime": { "type": "string", "description": "Session start time e.g. '16:30' or '4:30 PM' (optional)" },
+          "endTime": { "type": "string", "description": "Session end time e.g. '17:30' or '5:30 PM' (optional)" },
           "subjectId": { "type": "string", "description": "The unique ID of the subject (optional)" },
           "taskName": { "type": "string", "description": "Human-readable display name for this task (optional)" },
           "timestamp": { "type": "string", "description": "ISO date string for when the session took place (optional)" },
           "notes": { "type": "string", "description": "Optional notes on what was accomplished" },
           "markTaskCompleted": { "type": "boolean", "description": "If true, also marks chapter task as completed" }
         },
-        "required": ["chapterId", "taskId", "timeSpentMinutes"]
+        "required": ["chapterId", "taskId"]
       }
     },
     {
       "name": "get_study_time_analytics",
-      "description": "Calculates study time statistics from logged data. Returns total time spent, average time per session, empirical average time required to complete or revise each task type across multiple sessions, time-consuming chapter rankings, and recent session logs.",
+      "description": "Calculates study time statistics from logged data. Returns total time spent, daily, weekly, and monthly periodic study hours, average time per session, empirical average time required to complete or revise each task type across multiple sessions, time-consuming chapter rankings, and recent session logs.",
       "inputSchema": {
         "type": "object",
         "properties": {

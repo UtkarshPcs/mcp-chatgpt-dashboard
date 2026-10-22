@@ -1,6 +1,11 @@
 import { z } from "zod";
 import { ref, push, update, remove, get, set } from "firebase/database";
 import { db } from "@/lib/firebase";
+import { 
+  parseTimeRangeToMinutes, 
+  formatTimeRangeDisplay, 
+  calculatePeriodicStudyStats 
+} from "@/utils/timeCalculations";
 
 const ensureSubjectFramework = async (subjectId: string) => {
   const snap = await get(ref(db, `subjects/${subjectId}`));
@@ -837,11 +842,14 @@ export const registerSyllabusTools = (server: any) => {
     "log_task_time",
     {
       title: "Log Study Task Time",
-      description: "Logs the time spent on a specific task within a chapter. Records subject, chapter, task, duration in minutes, timestamp, and optional notes. Preserves historical records across repeated sessions without overwriting previous entries. Optionally marks the chapter task as completed.",
+      description: "Logs the time spent on a specific task within a chapter. Records subject, chapter, task, duration in minutes, optional date, optional start/end time window (e.g. 4:30 PM to 5:30 PM), timestamp, and optional notes. If start and end times are provided, duration is calculated automatically if omitted. Preserves historical records across repeated sessions without overwriting previous entries. Optionally marks the chapter task as completed.",
       inputSchema: z.object({
         chapterId: z.string().describe("The unique ID of the chapter being studied (call get_syllabus_state if not known)"),
         taskId: z.string().describe("The ID of the task (e.g. from the subject framework like 'm_concept', 't_lec', or 'revision' for chapter revision, or custom task ID)"),
-        timeSpentMinutes: z.number().positive().describe("Duration spent studying in minutes (e.g. 40)"),
+        timeSpentMinutes: z.number().positive().optional().describe("Duration spent studying in minutes (e.g. 40). Optional if startTime and endTime are provided"),
+        date: z.string().optional().describe("Session date in YYYY-MM-DD format (defaults to current date)"),
+        startTime: z.string().optional().describe("Session start time e.g. '16:30' or '4:30 PM' (optional)"),
+        endTime: z.string().optional().describe("Session end time e.g. '17:30' or '5:30 PM' (optional)"),
         subjectId: z.string().optional().describe("The unique ID of the subject (optional; automatically resolved from chapterId if omitted)"),
         taskName: z.string().optional().describe("Human-readable display name for this task (e.g. 'Standard Question Practice', 'NCERT Reading'). If omitted, will resolve from subject framework if available"),
         timestamp: z.string().optional().describe("ISO date string for when the session took place (defaults to current time)"),
@@ -852,11 +860,28 @@ export const registerSyllabusTools = (server: any) => {
     async (args: any) => {
       try {
         const now = new Date().toISOString();
-        const sessionTime = args.timestamp || now;
-        const minutes = Math.round(args.timeSpentMinutes);
+        let minutes: number;
 
-        if (minutes <= 0) {
-          return { content: [{ type: "text", text: "Error: 'timeSpentMinutes' must be greater than 0." }], isError: true };
+        if (typeof args.timeSpentMinutes === "number" && args.timeSpentMinutes > 0) {
+          minutes = Math.round(args.timeSpentMinutes);
+        } else if (args.startTime && args.endTime) {
+          const derived = parseTimeRangeToMinutes(args.startTime, args.endTime);
+          if (!derived || derived <= 0) {
+            return { content: [{ type: "text", text: "Error: Could not calculate valid duration from provided startTime and endTime." }], isError: true };
+          }
+          minutes = derived;
+        } else {
+          return { content: [{ type: "text", text: "Error: Either 'timeSpentMinutes' or both 'startTime' and 'endTime' must be provided." }], isError: true };
+        }
+
+        let sessionTime = args.timestamp;
+        if (!sessionTime) {
+          if (args.date) {
+            const timePart = args.startTime && args.startTime.match(/^\d{1,2}:\d{2}$/) ? `${args.startTime}:00` : "12:00:00";
+            sessionTime = `${args.date}T${timePart}.000Z`;
+          } else {
+            sessionTime = now;
+          }
         }
 
         // 1. Verify chapter exists
@@ -908,7 +933,7 @@ export const registerSyllabusTools = (server: any) => {
         }
 
         // 4. Push new immutable time log record
-        const newRef = await push(ref(db, "timeLogs"), {
+        const logPayload: Record<string, any> = {
           chapterId: args.chapterId,
           subjectId,
           taskId: args.taskId,
@@ -918,7 +943,13 @@ export const registerSyllabusTools = (server: any) => {
           notes: args.notes?.trim() || "",
           createdAt: now,
           updatedAt: now
-        });
+        };
+
+        if (args.date) logPayload.sessionDate = args.date;
+        if (args.startTime) logPayload.startTime = args.startTime;
+        if (args.endTime) logPayload.endTime = args.endTime;
+
+        const newRef = await push(ref(db, "timeLogs"), logPayload);
 
         // 5. Query chapter totals to give immediate useful feedback
         const timeLogsSnap = await get(ref(db, "timeLogs"));
@@ -929,10 +960,14 @@ export const registerSyllabusTools = (server: any) => {
         const chapterTotalMinutes = chapterLogs.reduce((sum: number, l: any) => sum + (l.timeSpentMinutes || 0), 0);
         const taskTotalMinutes = taskLogs.reduce((sum: number, l: any) => sum + (l.timeSpentMinutes || 0), 0);
 
+        const intervalStr = formatTimeRangeDisplay(args.startTime, args.endTime);
+        const intervalMsg = intervalStr ? ` (${intervalStr})` : "";
+        const dateMsg = args.date ? ` on ${args.date}` : "";
+
         return {
           content: [{
             type: "text",
-            text: `Successfully logged ${minutes} minutes for '${resolvedTaskName}' on chapter '${chapter.title}' (${subjectName})${taskCompletedMsg}.\nLog ID: ${newRef.key}\nTotal on this task: ${taskTotalMinutes}m across ${taskLogs.length} session(s).\nTotal on chapter: ${chapterTotalMinutes}m across ${chapterLogs.length} session(s).`
+            text: `Successfully logged ${minutes} minutes${intervalMsg}${dateMsg} for '${resolvedTaskName}' on chapter '${chapter.title}' (${subjectName})${taskCompletedMsg}.\nLog ID: ${newRef.key}\nTotal on this task: ${taskTotalMinutes}m across ${taskLogs.length} session(s).\nTotal on chapter: ${chapterTotalMinutes}m across ${chapterLogs.length} session(s).`
           }]
         };
       } catch (error: any) {
@@ -991,7 +1026,10 @@ export const registerSyllabusTools = (server: any) => {
           return `${h}h ${m}m`;
         };
 
-        // 2. Task Type Empirical Benchmarks (across multiple sessions)
+        // 2. Periodic Summary (Today, This Week, This Month, Trends)
+        const periodicStats = calculatePeriodicStudyStats(logs as any);
+
+        // 3. Task Type Empirical Benchmarks (across multiple sessions)
         const taskGroups: Record<string, {
           taskId: string;
           taskName: string;
@@ -1101,6 +1139,10 @@ export const registerSyllabusTools = (server: any) => {
           return {
             id: l.id,
             timestamp: l.timestamp,
+            sessionDate: l.sessionDate || null,
+            startTime: l.startTime || null,
+            endTime: l.endTime || null,
+            timeRange: formatTimeRangeDisplay(l.startTime, l.endTime),
             duration: formatDur(l.timeSpentMinutes),
             minutes: l.timeSpentMinutes,
             chapterTitle: chap ? chap.title : "Unknown Chapter",
@@ -1125,6 +1167,31 @@ export const registerSyllabusTools = (server: any) => {
                   chapterId: args.chapterId || null,
                   taskId: args.taskId || null
                 }
+              },
+              periodicSummary: {
+                today: {
+                  minutes: periodicStats.todayMinutes,
+                  formatted: formatDur(periodicStats.todayMinutes)
+                },
+                thisWeek: {
+                  minutes: periodicStats.thisWeekMinutes,
+                  formatted: formatDur(periodicStats.thisWeekMinutes)
+                },
+                thisMonth: {
+                  minutes: periodicStats.thisMonthMinutes,
+                  formatted: formatDur(periodicStats.thisMonthMinutes)
+                },
+                dailyAverage: {
+                  minutes: periodicStats.dailyAverageMinutes,
+                  formatted: formatDur(periodicStats.dailyAverageMinutes)
+                },
+                weeklyAverage: {
+                  minutes: periodicStats.weeklyAverageMinutes,
+                  formatted: formatDur(periodicStats.weeklyAverageMinutes)
+                },
+                dailyTrend: periodicStats.dailyTrend,
+                weeklyTrend: periodicStats.weeklyTrend,
+                monthlyTrend: periodicStats.monthlyTrend
               },
               taskTypeBenchmarks: taskBenchmarks,
               chapterRankings: chapterStats,

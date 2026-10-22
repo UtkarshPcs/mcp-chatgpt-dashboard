@@ -1,4 +1,27 @@
-import { TimeLog, Subject, Chapter, TaskBenchmark, ChapterTimeStat } from "@/types";
+import { 
+  TimeLog, 
+  Subject, 
+  Chapter, 
+  TaskBenchmark, 
+  ChapterTimeStat,
+  PeriodicStudyStats,
+  DailyStudyPoint,
+  WeeklyStudyPoint,
+  MonthlyStudyPoint
+} from "@/types";
+import { 
+  format, 
+  isToday, 
+  isThisWeek, 
+  isThisMonth, 
+  subDays, 
+  eachDayOfInterval, 
+  startOfWeek, 
+  endOfWeek, 
+  subWeeks, 
+  subMonths,
+  getISOWeek
+} from "date-fns";
 
 export const formatDuration = (minutes: number): string => {
   if (!minutes || minutes <= 0) return "0m";
@@ -9,6 +32,205 @@ export const formatDuration = (minutes: number): string => {
   const remaining = roundMins % 60;
   if (remaining === 0) return `${hours}h`;
   return `${hours}h ${remaining}m`;
+};
+
+/**
+ * Parses "16:30", "4:30 PM", or "04:30 pm" into total minutes from start of day (0-1439).
+ */
+export const parseTimeStringToMinutes = (str: string): number | null => {
+  if (!str) return null;
+  const match = str.trim().match(/^(\d{1,2}):(\d{2})(?:\s*(AM|PM))?$/i);
+  if (!match) return null;
+  let hours = parseInt(match[1], 10);
+  const minutes = parseInt(match[2], 10);
+  if (isNaN(hours) || isNaN(minutes) || minutes < 0 || minutes >= 60) return null;
+  
+  const ampm = match[3] ? match[3].toUpperCase() : null;
+  if (ampm === "PM" && hours < 12) hours += 12;
+  if (ampm === "AM" && hours === 12) hours = 0;
+  if (hours < 0 || hours >= 24) return null;
+  
+  return hours * 60 + minutes;
+};
+
+/**
+ * Calculates duration in minutes between start and end time.
+ * Handles overnight crossover if endTime <= startTime.
+ */
+export const parseTimeRangeToMinutes = (startTime: string, endTime: string): number | null => {
+  const s = parseTimeStringToMinutes(startTime);
+  const e = parseTimeStringToMinutes(endTime);
+  if (s === null || e === null) return null;
+  let diff = e - s;
+  if (diff <= 0) diff += 24 * 60; // Overnight session
+  return diff;
+};
+
+/**
+ * Formats a time string ("16:30" or "04:30 PM") into "4:30 PM".
+ */
+export const formatTime12h = (timeStr: string): string => {
+  const mins = parseTimeStringToMinutes(timeStr);
+  if (mins === null) return timeStr;
+  const h24 = Math.floor(mins / 60);
+  const m = mins % 60;
+  const period = h24 >= 12 ? "PM" : "AM";
+  const h12 = h24 % 12 || 12;
+  return `${h12}:${m.toString().padStart(2, "0")} ${period}`;
+};
+
+/**
+ * Formats a start and end time pair into a human-readable range, e.g. "4:30 PM – 5:30 PM".
+ */
+export const formatTimeRangeDisplay = (startTime?: string, endTime?: string): string | null => {
+  if (!startTime && !endTime) return null;
+  if (startTime && endTime) {
+    return `${formatTime12h(startTime)} – ${formatTime12h(endTime)}`;
+  }
+  return formatTime12h(startTime || endTime || "");
+};
+
+/**
+ * Normalizes log date from sessionDate ("YYYY-MM-DD") or timestamp.
+ */
+export const getLogDate = (log: TimeLog): Date => {
+  if (log.sessionDate) {
+    const parts = log.sessionDate.split("-").map(Number);
+    if (parts.length === 3 && !isNaN(parts[0]) && !isNaN(parts[1]) && !isNaN(parts[2])) {
+      return new Date(parts[0], parts[1] - 1, parts[2], 12, 0, 0);
+    }
+  }
+  const iso = log.timestamp || log.createdAt;
+  if (iso) {
+    const d = new Date(iso);
+    if (!isNaN(d.getTime())) return d;
+  }
+  return new Date();
+};
+
+/**
+ * Calculates periodic study hours: Today, This Week, This Month, plus trends.
+ */
+export const calculatePeriodicStudyStats = (timeLogs: TimeLog[]): PeriodicStudyStats => {
+  const now = new Date();
+  const safeLogs = timeLogs || [];
+
+  let todayMinutes = 0;
+  let thisWeekMinutes = 0;
+  let thisMonthMinutes = 0;
+
+  // Group minutes by day key ("YYYY-MM-DD")
+  const dayBuckets: Record<string, { minutes: number; count: number }> = {};
+  // Group minutes by month key ("YYYY-MM")
+  const monthBuckets: Record<string, { minutes: number; count: number }> = {};
+
+  for (const log of safeLogs) {
+    const logDate = getLogDate(log);
+    const mins = log.timeSpentMinutes || 0;
+
+    if (isToday(logDate)) {
+      todayMinutes += mins;
+    }
+    if (isThisWeek(logDate, { weekStartsOn: 1 })) {
+      thisWeekMinutes += mins;
+    }
+    if (isThisMonth(logDate)) {
+      thisMonthMinutes += mins;
+    }
+
+    const dayKey = format(logDate, "yyyy-MM-dd");
+    if (!dayBuckets[dayKey]) dayBuckets[dayKey] = { minutes: 0, count: 0 };
+    dayBuckets[dayKey].minutes += mins;
+    dayBuckets[dayKey].count += 1;
+
+    const monthKey = format(logDate, "yyyy-MM");
+    if (!monthBuckets[monthKey]) monthBuckets[monthKey] = { minutes: 0, count: 0 };
+    monthBuckets[monthKey].minutes += mins;
+    monthBuckets[monthKey].count += 1;
+  }
+
+  // 1. Daily Trend: Last 14 days continuous
+  const past14Days = eachDayOfInterval({ start: subDays(now, 13), end: now });
+  const dailyTrend: DailyStudyPoint[] = past14Days.map(day => {
+    const dateKey = format(day, "yyyy-MM-dd");
+    const bucket = dayBuckets[dateKey] || { minutes: 0, count: 0 };
+    return {
+      date: dateKey,
+      label: format(day, "EEE, MMM d"),
+      shortDay: format(day, "EEE"),
+      minutes: bucket.minutes,
+      formatted: formatDuration(bucket.minutes),
+      sessionCount: bucket.count,
+      isToday: isToday(day)
+    };
+  });
+
+  // 2. Weekly Trend: Last 6 weeks (Monday-Sunday)
+  const weeklyTrend: WeeklyStudyPoint[] = [];
+  for (let i = 5; i >= 0; i--) {
+    const d = subWeeks(now, i);
+    const s = startOfWeek(d, { weekStartsOn: 1 });
+    const e = endOfWeek(d, { weekStartsOn: 1 });
+    const weekKey = `${format(s, "yyyy")}-W${getISOWeek(s)}`;
+    
+    // Sum logs falling in this week's interval
+    let weekMins = 0;
+    let weekCount = 0;
+    for (const log of safeLogs) {
+      const lDate = getLogDate(log);
+      if (lDate >= s && lDate <= e) {
+        weekMins += log.timeSpentMinutes || 0;
+        weekCount += 1;
+      }
+    }
+
+    weeklyTrend.push({
+      weekKey,
+      label: `${format(s, "MMM d")} – ${format(e, "MMM d")}`,
+      minutes: weekMins,
+      formatted: formatDuration(weekMins),
+      sessionCount: weekCount,
+      isCurrentWeek: i === 0
+    });
+  }
+
+  // 3. Monthly Trend: Last 6 months
+  const monthlyTrend: MonthlyStudyPoint[] = [];
+  for (let i = 5; i >= 0; i--) {
+    const d = subMonths(now, i);
+    const mKey = format(d, "yyyy-MM");
+    const bucket = monthBuckets[mKey] || { minutes: 0, count: 0 };
+    monthlyTrend.push({
+      monthKey: mKey,
+      label: format(d, "MMM yyyy"),
+      minutes: bucket.minutes,
+      formatted: formatDuration(bucket.minutes),
+      sessionCount: bucket.count,
+      isCurrentMonth: i === 0
+    });
+  }
+
+  // Averages across active periods
+  const activeDays = Object.values(dayBuckets).filter(b => b.minutes > 0);
+  const dailyAverageMinutes = activeDays.length > 0
+    ? Math.round(activeDays.reduce((acc, curr) => acc + curr.minutes, 0) / activeDays.length)
+    : 0;
+
+  const activeWeeks = weeklyTrend.filter(w => w.minutes > 0);
+  const weeklyAverageMinutes = activeWeeks.length > 0
+    ? Math.round(activeWeeks.reduce((acc, curr) => acc + curr.minutes, 0) / activeWeeks.length)
+    : 0;
+
+  return {
+    todayMinutes,
+    thisWeekMinutes,
+    thisMonthMinutes,
+    dailyAverageMinutes,
+    weeklyAverageMinutes,
+    dailyTrend,
+    weeklyTrend,
+    monthlyTrend
+  };
 };
 
 export const calculateTotalStudyTime = (timeLogs: TimeLog[]): number => {

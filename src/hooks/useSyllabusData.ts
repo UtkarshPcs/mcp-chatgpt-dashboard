@@ -116,10 +116,22 @@ export function useSyllabusData() {
     timeSpentMinutes: number;
     notes?: string;
     timestamp?: string;
+    sessionDate?: string;
+    startTime?: string;
+    endTime?: string;
     markTaskCompleted?: boolean;
   }) => {
     const now = new Date().toISOString();
-    const sessionTime = entry.timestamp || now;
+    let sessionTime = entry.timestamp;
+    if (!sessionTime) {
+      if (entry.sessionDate) {
+        const timePart = entry.startTime && entry.startTime.match(/^\d{1,2}:\d{2}$/) ? `${entry.startTime}:00` : "12:00:00";
+        sessionTime = `${entry.sessionDate}T${timePart}.000Z`;
+      } else {
+        sessionTime = now;
+      }
+    }
+
     try {
       if (entry.markTaskCompleted) {
         const updatePath = `chapters/${entry.chapterId}/tasks/${entry.taskId}`;
@@ -130,7 +142,7 @@ export function useSyllabusData() {
         });
       }
 
-      await push(ref(db, "timeLogs"), {
+      const logPayload: Record<string, any> = {
         chapterId: entry.chapterId,
         subjectId: entry.subjectId,
         taskId: entry.taskId,
@@ -140,7 +152,13 @@ export function useSyllabusData() {
         notes: entry.notes?.trim() || "",
         createdAt: now,
         updatedAt: now
-      });
+      };
+
+      if (entry.sessionDate) logPayload.sessionDate = entry.sessionDate;
+      if (entry.startTime) logPayload.startTime = entry.startTime;
+      if (entry.endTime) logPayload.endTime = entry.endTime;
+
+      await push(ref(db, "timeLogs"), logPayload);
     } catch (e) {
       console.error("Error logging study time", e);
       throw e;
